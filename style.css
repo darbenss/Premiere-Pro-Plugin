@@ -1,0 +1,110 @@
+/* --- CORE LAYOUT --- */
+body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+sp-theme {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100vh;
+    background-color: var(--spectrum-alias-background-color-default);
+    color: var(--spectrum-alias-text-color-default);
+    font-family: var(--spectrum-alias-body-text-font-family, 'adobe-clean', sans-serif);
+}
+
+.app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+}
+
+/* --- CENTER DISPLAY --- */
+.main-display {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 20px;
+    overflow-y: auto; 
+}
+
+.empty-state-icon {
+    width: 64px;
+    height: 64px;
+    margin-bottom: 16px;
+    opacity: 0.9;
+    fill: currentColor;
+    /* CHANGED: Use Light Gray/White */
+    color: var(--spectrum-global-color-gray-200, #E1E1E1); 
+}
+
+.empty-state-text {
+    font-size: 18px;
+    font-weight: 700;
+    margin: 0;
+    /* CHANGED: Use White */
+    color: var(--spectrum-global-color-gray-50, #FFFFFF);
+}
+
+.empty-state-subtext {
+    font-size: 14px;
+    margin-top: 8px;
+    /* CHANGED: Use Medium-Light Gray */
+    color: var(--spectrum-global-color-gray-400, #A8A8A8);
+}
+
+/* --- CHAT & CONTROLS --- */
+.controls-section {
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    border-top: 1px solid var(--spectrum-alias-border-color-mid, #3e3e3e);
+    background-color: var(--spectrum-alias-background-color-secondary, #282828); 
+    gap: 12px;
+}
+
+.context-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+}
+
+.chip-btn {
+    --mod-actionbutton-label-padding-left: 12px;
+    --mod-actionbutton-label-padding-right: 12px;
+    
+    /* CHANGED: Dashed border is now lighter */
+    border: 1px dashed var(--spectrum-global-color-gray-400, #909090);
+    border-radius: 16px;
+    
+    /* CHANGED: Button text color is now lighter */
+    color: var(--spectrum-global-color-gray-50, #ffffff);
+}
+
+.input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+
+sp-textfield {
+    flex-grow: 1;
+}
+
+.send-btn-icon {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
+    /* CHANGED: Send Icon is now White */
+    color: var(--spectrum-global-color-gray-100, #ffffff);
+}

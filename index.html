@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit with AI - Premiere Pro</title>
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- IMPORTING THEMES CORRECTLY -->
+    <script type="module">
+        import '@spectrum-web-components/theme/sp-theme.js';
+        import '@spectrum-web-components/theme/src/themes.js';
+        import '@spectrum-web-components/button/sp-button.js';
+        import '@spectrum-web-components/action-button/sp-action-button.js';
+        import '@spectrum-web-components/textfield/sp-textfield.js';
+        import '@spectrum-web-components/progress-bar/sp-progress-bar.js';
+    </script>
+</head>
+<body>
+
+    <sp-theme theme="spectrum" color="dark" scale="medium">
+        <div class="app-container">
+            
+            <div class="main-display" id="mainDisplay">
+                <svg class="empty-state-icon" viewBox="0 0 24 24">
+                    <path d="M7.5,5.6L5,0L2.5,5.6L0,7.5l5.6,2.5L7.5,15l2.5-5.6l5.6-2.5L7.5,5.6z M16.5,9.4L15,6l-1.5,3.4L10,11l3.4,1.5 L15,16l1.5-3.4L20,11L16.5,9.4z M17.6,17.6L17,16l-0.6,1.6L15,18l1.6,0.6L17.2,20l0.6-1.6L19.4,18L17.6,17.6z"/>
+                </svg>  
+                <h1 class="empty-state-text">Edit with AI</h1>
+                <p class="empty-state-subtext">Select a sequence and ask AI to edit.</p>
+            </div>
+
+            <div class="controls-section">
+                <div class="context-chips">
+                    <sp-action-button class="chip-btn" quiet label="Trim Silence">Trim Silence</sp-action-button>
+                    <sp-action-button class="chip-btn" quiet label="Audio Sync">Audio Sync</sp-action-button>
+                    <sp-action-button class="chip-btn" quiet label="Auto Cut Beat">Auto Cut Beat</sp-action-button>
+                </div>
+
+                <div class="input-wrapper">
+                    <sp-textfield id="aiInput" placeholder="Describe your edit..." multiline style="resize: none;"></sp-textfield>
+                    <sp-action-button id="sendBtn" quiet>
+                        <svg slot="icon" class="send-btn-icon" viewBox="0 0 24 24">
+                            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                        </svg>
+                    </sp-action-button>
+                </div>
+            </div>
+
+        </div>
+    </sp-theme>
+
+    <script src="main.js"></script>
+</body>
+</html>
