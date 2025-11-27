@@ -1,6 +1,48 @@
 const app = require('premierepro');
-const { Constants } = require('premierepro');
-const { Time } = require('premierepro');
+const { Constants, EncoderManager, TickTime, Marker, Markers, CompoundAction } = require('premierepro');
+
+// ------------- REAL FUNCTION FOR HANDLING PYTHON --------------
+// 1. Handle Context Chips
+// chips.forEach(chip => {
+//     // Change 'e' to 'event' for clarity
+//     chip.addEventListener('click', async (event) => { 
+
+//         // --- FIX 1: Use currentTarget, not target ---
+//         // e.target might be the icon or text. currentTarget is ALWAYS the button.
+//         const action = event.currentTarget.getAttribute('label');
+
+//         console.log("Button Clicked:", action); // Check your console for this!
+
+//         if (action === "Trim Silence") {
+//             handleTrimSilence(); 
+//         } 
+//         // --- TEST SECTION ---
+//         else if (action === "Audio Sync") {
+//             console.log("Attempting Audio Export Test...");
+
+//             // --- FIX 2: Wrap in a BIG Try/Catch to see errors ---
+//             try {
+//                 // Visual feedback so you know it started
+//                 mainDisplay.innerHTML = `<h3 style="color:white">Exporting... Check Console.</h3>`;
+
+//                 const path = await exportAudioForAnalysis();
+
+//                 alert(`SUCCESS!\nFile saved at:\n${path}`);
+//                 mainDisplay.innerHTML = `<h3 style="color:#2d9d78">Export Success!</h3>`;
+
+//             } catch (err) {
+//                 // This will tell us WHY it failed
+//                 alert(`ERROR:\n${err.message}`);
+//                 console.error("Export Failed:", err);
+//                 mainDisplay.innerHTML = `<h3 style="color:#d7373f">Error: ${err.message}</h3>`;
+//             }
+//         } 
+//         // --- END TEST SECTION ---
+//         else {
+//             inputField.value = `Perform ${action}`;
+//         }
+//     });
+// });
 
 // Wait for the DOM to be fully loaded before running script
 document.addEventListener("DOMContentLoaded", () => {
@@ -15,48 +57,57 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // 1. Handle Context Chips
     chips.forEach(chip => {
-        // Change 'e' to 'event' for clarity
         chip.addEventListener('click', async (event) => {
-
-            // --- FIX 1: Use currentTarget, not target ---
-            // e.target might be the icon or text. currentTarget is ALWAYS the button.
+            // FIX: Use currentTarget to get the button element, not the clicked icon/text
             const action = event.currentTarget.getAttribute('label');
+            console.log("Button clicked:", action);
 
-            console.log("Button Clicked:", action); // Check your console for this!
-
+            // 1. TRIM SILENCE (Real Feature)
             if (action === "Trim Silence") {
                 handleTrimSilence();
             }
-            // --- TEST SECTION ---
+
+            // 2. AUDIO SYNC (Placeholder)
             else if (action === "Audio Sync") {
-                console.log("Attempting Audio Export Test...");
-
-                // --- FIX 2: Wrap in a BIG Try/Catch to see errors ---
-                try {
-                    // Visual feedback so you know it started
-                    mainDisplay.innerHTML = `<h3 style="color:white">Exporting... Check Console.</h3>`;
-
-                    const path = await exportAudioForAnalysis();
-
-                    alert(`SUCCESS!\nFile saved at:\n${path}`);
-                    mainDisplay.innerHTML = `<h3 style="color:#2d9d78">Export Success!</h3>`;
-
-                } catch (err) {
-                    // This will tell us WHY it failed
-                    alert(`ERROR:\n${err.message}`);
-                    console.error("Export Failed:", err);
-                    mainDisplay.innerHTML = `<h3 style="color:#d7373f">Error: ${err.message}</h3>`;
-                }
+                console.log("Audio Sync logic not connected yet.");
+                // FIX: Changed alert to console.log to prevent crashes
+                console.log("Audio Sync is waiting for Python!");
             }
-            // --- END TEST SECTION ---
-            else {
-                inputField.value = `Perform ${action}`;
+
+            // 3. AUTO CUT BEAT (DEBUG / TEST BUTTON)
+            else if (action === "Auto Cut Beat") {
+                console.log("--- STARTING MOCK CUT TEST ---");
+
+                // MOCK DATA: Simulating Python response with array of arrays
+                const rawPythonResponse = {
+                    "segments": [
+                        [0.0, 0.5],
+                        [3.0, 5.0],
+                        [8.0, 10.0]
+                    ]
+                };
+
+                // Convert [start, end] arrays into objects { start, end }
+                const mockData = rawPythonResponse.segments.map(segment => ({
+                    start: segment[0],
+                    end: segment[1]
+                }));
+
+                try {
+                    // Call the surgery function directly
+                    await performTrimSilence(mockData);
+                    // FIX: Removed alert() call
+                    console.log("Success! Test Complete.");
+                } catch (e) {
+                    console.error("Test Failed:", e);
+                    // FIX: Removed alert() call, show error in UI if needed
+                    console.error("Test Failed Message: " + e.message);
+                }
             }
         });
     });
 
     // 2. Handle Text Input (The "Send" button)
-    // Note: For now, this just logs text. You can connect the Chat Router here later.
     sendBtn.addEventListener('click', () => {
         const text = inputField.value.trim();
         if (text) console.log("User typed:", text);
@@ -71,7 +122,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
     // --- MAIN FEATURE: TRIM SILENCE ---
-
     async function handleTrimSilence() {
         let currentMessage = inputField.value.trim();
         // 1. UI FEEDBACK: LOCK INPUT & SHOW PROGRESS
@@ -92,15 +142,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
             // Update UI
             mainDisplay.innerHTML = `
-                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--spectrum-global-color-gray-50);">
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--spectrum-global-color-gray-50);">
                     <sp-progress-bar label="Step 2: AI Analysis..." indeterminate style="width: 200px; margin-bottom: 20px;"></sp-progress-bar>
                     <p style="font-size: 14px;">Sending to Python VAD...</p>
                 </div>
             `;
 
             // --- STEP B: SEND PATH TO PYTHON ---
-            // Note: We send the command to the specific endpoint we created in server.py
-            const response = await fetch("http://localhost:8000/chat", {
+            const response = await fetch("http://localhost:8000/trim-silence", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -113,17 +162,31 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!response.ok) throw new Error(`Python Server Error: ${response.statusText}`);
 
             const result = await response.json();
-            // Expecting format: { silent_timestamps: [[1.5, 3.2], [10.1, 12.0]] }
 
-            console.log("Result:", result);
-            const ranges = result.silent_timestamps || result.data; // Handle both naming conventions
+            // Parsing logic
+            let ranges = [];
 
+            // A. Check for the complex structure from your partner
+            if (result.command &&
+                result.command.payload &&
+                result.command.payload.segments) {
+                ranges = result.command.payload.segments;
+            }
+            // B. Check for simple structures (Backup/Testing)
+            else if (result.silent_timestamps) {
+                ranges = result.silent_timestamps;
+            }
+            else if (result.data) {
+                ranges = result.data;
+            }
+
+            console.log("Final Parsed Ranges:", ranges);
 
             // --- STEP C: CUT THE VIDEO (The "Surgery") ---
             if (ranges && ranges.length > 0) {
 
                 // Perform the actual timeline edits
-                performTrimSilence(ranges);
+                await performTrimSilence(ranges); // Added await here for safety
 
                 // SUCCESS UI
                 mainDisplay.innerHTML = `
@@ -160,9 +223,6 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- HELPER 1: EXPORT AUDIO (FIXED) ---
     async function exportAudioForAnalysis() {
         console.log("--- 1. Function Started (Using EncoderManager) ---");
-
-        // --- IMPORT NEW CLASSES ---
-        const { EncoderManager, Constants } = require('premierepro');
 
         // 1. GET PROJECT & SEQUENCE
         const project = await app.Project.getActiveProject();
@@ -218,68 +278,139 @@ document.addEventListener("DOMContentLoaded", () => {
         return tempPath;
     }
 
-    // --- HELPER 2: PERFORM CUTS (FIXED) ---
+    // --- STATE MANAGEMENT ---
+    let wizardState = {
+        ranges: [],
+        currentIndex: 0
+    };
+
+    // --- HELPER 2: START REVIEW WIZARD ---
     async function performTrimSilence(silentRanges) {
-        // --- FIX: Get Sequence correctly here too ---
-        const project = await app.Project.getActiveProject();
-        if (!project) return;
-        const seq = await project.getActiveSequence();
-        if (!seq) return;
+        console.log("--- Starting Review Wizard ---");
 
-        const editor = app.premierepro.SequenceEditor.getEditor(seq.sequenceID);
-        const compoundAction = app.premierepro.CompoundAction.create("AI Trim Silence");
+        // 1. Save Data & Reset State
+        // We reverse them so the user cuts from the end (safer for ripple edits)
+        wizardState.ranges = [...silentRanges].reverse();
+        wizardState.currentIndex = 0;
 
-        // Normalize ranges (handle both array formats)
-        let normalizedRanges = silentRanges.map(r => {
-            if (Array.isArray(r)) return { start: r[0], end: r[1] };
-            return r;
-        });
+        // 2. Show the UI
+        const reviewSection = document.getElementById('reviewSection');
+        const inputWrapper = document.querySelector('.input-wrapper');
+        const chips = document.querySelector('.context-chips');
 
-        // Sort by Start Time, then Reverse (Cut from end to start)
-        normalizedRanges.sort((a, b) => a.start - b.start).reverse();
+        if (reviewSection) {
+            reviewSection.style.display = 'flex';
+            // Hide other controls to focus the user
+            if (inputWrapper) inputWrapper.style.display = 'none';
+            if (chips) chips.style.display = 'none';
 
-        normalizedRanges.forEach(range => {
-            if (range.start >= range.end) return;
+            // Setup Buttons (Remove old listeners to prevent duplicates)
+            const btnNext = document.getElementById('btnNext');
+            const btnSkip = document.getElementById('btnSkip');
 
-            // Convert Seconds to Ticks
-            const startTicks = (range.start * 254016000000).toString();
-            const endTicks = (range.end * 254016000000).toString();
+            // Clone and replace to clear old listeners (simple trick)
+            const newNext = btnNext.cloneNode(true);
+            const newSkip = btnSkip.cloneNode(true);
+            btnNext.parentNode.replaceChild(newNext, btnNext);
+            btnSkip.parentNode.replaceChild(newSkip, btnSkip);
 
-            const timeIn = new Time();
-            timeIn.ticks = startTicks;
-
-            const timeOut = new Time();
-            timeOut.ticks = endTicks;
-
-            compoundAction.addAction(seq.createSetInPointAction(timeIn));
-            compoundAction.addAction(seq.createSetOutPointAction(timeOut));
-            compoundAction.addAction(editor.createRemoveItemsAction(true, app.premierepro.Constants.MediaType.VIDEO_AND_AUDIO, false));
-        });
-
-        compoundAction.execute();
-
-        // Clean up
-        seq.setInPoint(0);
-        seq.setOutPoint(0);
-    }
-
-    /**
-     * Helper: Wait until the file actually appears on disk
-     */
-    async function waitForFileCreation(fs, folder, filename) {
-        let attempts = 0;
-        while (attempts < 20) { // Try for ~10 seconds
-            try {
-                // Try to get the file
-                await folder.getEntry(filename);
-                return; // Found it!
-            } catch (e) {
-                // Not found yet
-            }
-            await new Promise(r => setTimeout(r, 500)); // Wait 0.5s
-            attempts++;
+            // Add Logic
+            newNext.addEventListener('click', () => nextStep(true));
+            newSkip.addEventListener('click', () => nextStep(false));
         }
-        throw new Error("Export timed out. File was not created.");
+
+        // 3. Highlight the First One
+        await highlightCurrentRange();
     }
 
-});
+
+    // --- WIZARD STEP LOGIC ---
+    async function nextStep(wasActionTaken) {
+        // Move to next item
+        wizardState.currentIndex++;
+
+        // Check if finished
+        if (wizardState.currentIndex >= wizardState.ranges.length) {
+            finishWizard();
+            return;
+        }
+
+        // Highlight the next one
+        await highlightCurrentRange();
+    }
+
+    async function highlightCurrentRange() {
+        const range = wizardState.ranges[wizardState.currentIndex];
+        const index = wizardState.currentIndex + 1;
+        const total = wizardState.ranges.length;
+
+        // 1. Update UI Text
+        document.getElementById('reviewStatus').textContent = `Silence ${index} of ${total}`;
+        document.getElementById('reviewTime').textContent = `${range.start.toFixed(1)}s - ${range.end.toFixed(1)}s`;
+
+        // 2. Set In/Out Points (The Visual Proof)
+        const { TickTime } = require('premierepro');
+        const project = await app.Project.getActiveProject();
+        const seq = await project.getActiveSequence();
+
+        const startTick = TickTime.createWithSeconds(range.start);
+        const endTick = TickTime.createWithSeconds(range.end);
+
+        await project.lockedAccess(async () => {
+            await project.executeTransaction((compoundAction) => {
+                if (seq.createSetInPointAction)
+                    compoundAction.addAction(seq.createSetInPointAction(startTick));
+                if (seq.createSetOutPointAction)
+                    compoundAction.addAction(seq.createSetOutPointAction(endTick));
+            });
+        });
+
+        // 3. Move Playhead
+        seq.setPlayerPosition(startTick);
+    }
+
+    function finishWizard() {
+        // Reset UI
+        document.getElementById('reviewSection').style.display = 'none';
+        document.querySelector('.input-wrapper').style.display = 'flex';
+        document.querySelector('.context-chips').style.display = 'flex';
+
+        // Clear In/Out
+        alert("Review Complete! All segments processed.");
+    }
+
+}); // --- END OF DOMContentLoaded ---
+
+
+// --- HELPER FUNCTIONS (MUST BE OUTSIDE DOM LISTENER) ---
+
+/**
+ * Helper: Wait until the file actually appears on disk
+ */
+async function waitForFileCreation(fs, folder, filename) { // <--- Make sure 'async' is here!
+    let attempts = 0;
+    while (attempts < 20) {
+        try {
+            await folder.getEntry(filename);
+            return;
+        } catch (e) {
+            // Not found yet
+        }
+        await new Promise(r => setTimeout(r, 500));
+        attempts++;
+    }
+    throw new Error("Export timed out. File was not created.");
+}
+
+/**
+ * Snaps a time in seconds to the nearest video frame.
+ * This prevents 0.01s gaps caused by sub-frame audio edits.
+ * @param {number} seconds - The raw time from Python
+ * @param {number} fps - The sequence frame rate (default 23.976)
+ * @returns {number} - The snapped time in seconds
+ */
+function snapToFrame(seconds, fps) {
+    const frameDuration = 1.0 / fps;
+    const frameCount = Math.round(seconds * fps);
+    return frameCount * frameDuration;
+}
