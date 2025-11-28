@@ -149,7 +149,7 @@ document.addEventListener("DOMContentLoaded", () => {
             `;
 
             // --- STEP B: SEND PATH TO PYTHON ---
-            const response = await fetch("http://localhost:8000/trim-silence", {
+            const response = await fetch("http://localhost:8000/chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -182,12 +182,24 @@ document.addEventListener("DOMContentLoaded", () => {
 
             console.log("Final Parsed Ranges:", ranges);
 
+            // Convert [start, end] arrays into objects { start, end }
+            const ranges_parsed = ranges.map(segment => ({
+                start: segment[0],
+                end: segment[1]
+            }));
+
+
             // --- STEP C: CUT THE VIDEO (The "Surgery") ---
-            if (ranges && ranges.length > 0) {
+            if (ranges_parsed && ranges_parsed.length > 0) {
 
                 // Perform the actual timeline edits
-                await performTrimSilence(ranges); // Added await here for safety
-
+                try {
+                    await performTrimSilence(ranges_parsed);
+                    console.log("Trim Success!");
+                } catch (e) {
+                    console.error("Trim Failed:", e);
+                    console.error("Trim Failed Message: " + e.message);
+                }
                 // SUCCESS UI
                 mainDisplay.innerHTML = `
                     <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--spectrum-global-color-gray-50);">
@@ -195,7 +207,7 @@ document.addEventListener("DOMContentLoaded", () => {
                             <path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/>
                         </svg>
                         <h2 style="margin: 0 0 8px 0;">Success!</h2>
-                        <p style="margin: 0; color: var(--spectrum-global-color-gray-300);">Removed ${ranges.length} silent segments.</p>
+                        <p style="margin: 0; color: var(--spectrum-global-color-gray-300);">Removed ${ranges_parsed.length} silent segments.</p>
                     </div>
                 `;
             } else {
