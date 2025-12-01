@@ -1,50 +1,20 @@
+// ============================================================================
+//  GLOBAL IMPORTS & CONSTANTS
+// ============================================================================
 const app = require('premierepro');
-const { Constants, EncoderManager, TickTime, Marker, Markers, CompoundAction } = require('premierepro');
+const { Constants, EncoderManager, TickTime, Marker, Markers, CompoundAction, Exporter } = require('premierepro');
+const { storage } = require("uxp");
+const fs = storage.localFileSystem;
 
-// ------------- REAL FUNCTION FOR HANDLING PYTHON --------------
-// 1. Handle Context Chips
-// chips.forEach(chip => {
-//     // Change 'e' to 'event' for clarity
-//     chip.addEventListener('click', async (event) => { 
+// Global State for the Wizard
+let wizardState = {
+    ranges: [],
+    currentIndex: 0
+};
 
-//         // --- FIX 1: Use currentTarget, not target ---
-//         // e.target might be the icon or text. currentTarget is ALWAYS the button.
-//         const action = event.currentTarget.getAttribute('label');
-
-//         console.log("Button Clicked:", action); // Check your console for this!
-
-//         if (action === "Trim Silence") {
-//             handleTrimSilence(); 
-//         } 
-//         // --- TEST SECTION ---
-//         else if (action === "Audio Sync") {
-//             console.log("Attempting Audio Export Test...");
-
-//             // --- FIX 2: Wrap in a BIG Try/Catch to see errors ---
-//             try {
-//                 // Visual feedback so you know it started
-//                 mainDisplay.innerHTML = `<h3 style="color:white">Exporting... Check Console.</h3>`;
-
-//                 const path = await exportAudioForAnalysis();
-
-//                 alert(`SUCCESS!\nFile saved at:\n${path}`);
-//                 mainDisplay.innerHTML = `<h3 style="color:#2d9d78">Export Success!</h3>`;
-
-//             } catch (err) {
-//                 // This will tell us WHY it failed
-//                 alert(`ERROR:\n${err.message}`);
-//                 console.error("Export Failed:", err);
-//                 mainDisplay.innerHTML = `<h3 style="color:#d7373f">Error: ${err.message}</h3>`;
-//             }
-//         } 
-//         // --- END TEST SECTION ---
-//         else {
-//             inputField.value = `Perform ${action}`;
-//         }
-//     });
-// });
-
-// Wait for the DOM to be fully loaded before running script
+// ============================================================================
+//  MAIN ENTRY POINT | INITIALIZATION 
+// ============================================================================
 document.addEventListener("DOMContentLoaded", () => {
 
     // --- UI ELEMENTS ---
@@ -54,63 +24,33 @@ document.addEventListener("DOMContentLoaded", () => {
     const mainDisplay = document.getElementById('mainDisplay');
 
     // --- EVENT LISTENERS ---
-
-    // 1. Handle Context Chips
     chips.forEach(chip => {
         chip.addEventListener('click', async (event) => {
-            // FIX: Use currentTarget to get the button element, not the clicked icon/text
             const action = event.currentTarget.getAttribute('label');
             console.log("Button clicked:", action);
 
-            // 1. TRIM SILENCE (Real Feature)
+            // FEATURE 1: TRIM SILENCE
             if (action === "Trim Silence") {
-                handleTrimSilence();
+                await handleTrimSilence();
             }
 
-            // 2. AUDIO SYNC (Placeholder)
+            // FEATURE 2: TRANSITION RECOMMENDATION
+            else if (action === "Transition Recommendation") {
+                await handleTransitionRecommendation();
+            }
+
+            // FEATURE 3: AUDIO SYNC
             else if (action === "Audio Sync") {
-                console.log("Audio Sync logic not connected yet.");
-                // FIX: Changed alert to console.log to prevent crashes
-                console.log("Audio Sync is waiting for Python!");
-            }
-
-            // 3. AUTO CUT BEAT (DEBUG / TEST BUTTON)
-            else if (action === "Auto Cut Beat") {
-                console.log("--- STARTING MOCK CUT TEST ---");
-
-                // MOCK DATA: Simulating Python response with array of arrays
-                const rawPythonResponse = {
-                    "segments": [
-                        [0.0, 0.5],
-                        [3.0, 5.0],
-                        [8.0, 10.0]
-                    ]
-                };
-
-                // Convert [start, end] arrays into objects { start, end }
-                const mockData = rawPythonResponse.segments.map(segment => ({
-                    start: segment[0],
-                    end: segment[1]
-                }));
-
-                try {
-                    // Call the surgery function directly
-                    await performTrimSilence(mockData);
-                    // FIX: Removed alert() call
-                    console.log("Success! Test Complete.");
-                } catch (e) {
-                    console.error("Test Failed:", e);
-                    // FIX: Removed alert() call, show error in UI if needed
-                    console.error("Test Failed Message: " + e.message);
-                }
+                await handleAudioSync();
             }
         });
     });
 
-    // 2. Handle Text Input (The "Send" button)
+    // --- TEXT INPUT HANDLERS ---
     sendBtn.addEventListener('click', () => {
         const text = inputField.value.trim();
         if (text) console.log("User typed:", text);
+        // Future: You can route text commands to functions here
     });
 
     inputField.addEventListener('keydown', (e) => {
@@ -121,10 +61,15 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
 
-    // --- MAIN FEATURE: TRIM SILENCE ---
+    // ========================================================================
+    //  FEATURE 1: TRIM SILENCE (Logic & Wizard)
+    // ========================================================================
     async function handleTrimSilence() {
+        const inputField = document.getElementById('aiInput');
+        const mainDisplay = document.getElementById('mainDisplay');
         let currentMessage = inputField.value.trim();
-        // 1. UI FEEDBACK: LOCK INPUT & SHOW PROGRESS
+
+        // UI Loading
         inputField.disabled = true;
         mainDisplay.innerHTML = `
             <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--spectrum-global-color-gray-50);">
@@ -135,12 +80,12 @@ document.addEventListener("DOMContentLoaded", () => {
         `;
 
         try {
-            // --- STEP A: EXPORT AUDIO (The "Blood Draw") ---
+            // Export
             console.log("Starting Audio Export...");
             const audioFilePath = await exportAudioForAnalysis();
             console.log("Audio Exported to:", audioFilePath);
 
-            // Update UI
+            // Send to Python
             mainDisplay.innerHTML = `
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--spectrum-global-color-gray-50);">
                     <sp-progress-bar label="Step 2: AI Analysis..." indeterminate style="width: 200px; margin-bottom: 20px;"></sp-progress-bar>
@@ -148,7 +93,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 </div>
             `;
 
-            // --- STEP B: SEND PATH TO PYTHON ---
             const response = await fetch("http://localhost:8000/chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -160,19 +104,17 @@ document.addEventListener("DOMContentLoaded", () => {
             });
 
             if (!response.ok) throw new Error(`Python Server Error: ${response.statusText}`);
-
             const result = await response.json();
 
-            // Parsing logic
+            // Parse Response
+            const aiMessage = result.response_text || "Analysis complete.";
             let ranges = [];
 
-            // A. Check for the complex structure from your partner
-            if (result.command &&
-                result.command.payload &&
-                result.command.payload.segments) {
+            // Check for the complex structure from python
+            if (result.command && result.command.payload && result.command.payload.segments) {
                 ranges = result.command.payload.segments;
             }
-            // B. Check for simple structures (Backup/Testing)
+            // Check for simple structures (Backup/Testing)
             else if (result.silent_timestamps) {
                 ranges = result.silent_timestamps;
             }
@@ -180,7 +122,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 ranges = result.data;
             }
 
-            console.log("Final Parsed Ranges:", ranges);
+            console.log("Parsed Ranges:", ranges);
 
             // Convert [start, end] arrays into objects { start, end }
             const ranges_parsed = ranges.map(segment => ({
@@ -188,8 +130,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 end: segment[1]
             }));
 
-
-            // --- STEP C: CUT THE VIDEO (The "Surgery") ---
+            // Recommend to Cut the Video
             if (ranges_parsed && ranges_parsed.length > 0) {
 
                 // Perform the actual timeline edits
@@ -202,16 +143,29 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
                 // SUCCESS UI
                 mainDisplay.innerHTML = `
-                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--spectrum-global-color-gray-50);">
+                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--spectrum-global-color-gray-50); padding: 20px; text-align: center;">
+                            
+                        <div style="background-color: var(--spectrum-global-color-gray-200); color: var(--spectrum-global-color-gray-900); padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; max-width: 90%; font-size: 14px; line-height: 1.4; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+                            "${aiMessage}"
+                        </div>
+                
                         <svg style="width: 48px; height: 48px; fill: #2D9D78; margin-bottom: 16px;" viewBox="0 0 24 24">
                             <path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/>
                         </svg>
-                        <h2 style="margin: 0 0 8px 0;">Success!</h2>
-                        <p style="margin: 0; color: var(--spectrum-global-color-gray-300);">Removed ${ranges_parsed.length} silent segments.</p>
+                        <h2 style="margin: 0 0 8px 0;">Ready to Review</h2>
+                        <p style="margin: 0; color: var(--spectrum-global-color-gray-300);">Found ${ranges_parsed.length} silent segments.</p>
+                        <p style="font-size: 12px; margin-top: 8px; opacity: 0.7;">Use the controls below to review.</p>
                     </div>
                 `;
             } else {
-                throw new Error("No silence detected in the audio.");
+                mainDisplay.innerHTML = `
+                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--spectrum-global-color-gray-50); padding: 20px; text-align: center;">
+                        <div style="background-color: var(--spectrum-global-color-gray-200); color: var(--spectrum-global-color-gray-900); padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;">
+                            "${aiMessage}"
+                        </div>
+                        <p>No silent segments were found to cut.</p>
+                    </div>
+                `;
             }
 
         } catch (error) {
@@ -229,14 +183,218 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    // --- TRIM SILENCE WIZARD HELPERS ---
+    async function performTrimSilence(silentRanges) {
+        console.log("--- Starting Review Wizard ---");
 
-    // --- CORE HELPER FUNCTIONS ---
+        // Reverse system for user cut from end 
+        wizardState.ranges = [...silentRanges].reverse();
+        wizardState.currentIndex = 0;
 
-    // --- HELPER 1: EXPORT AUDIO (FIXED) ---
+        // UI Setup 
+        const reviewSection = document.getElementById('reviewSection');
+        const inputWrapper = document.querySelector('.input-wrapper');
+        const chips = document.querySelector('.context-chips');
+
+        if (reviewSection) {
+            reviewSection.style.display = 'flex';
+            if (inputWrapper) inputWrapper.style.display = 'none';
+            if (chips) chips.style.display = 'none';
+
+            // Connect Buttons
+            const btnNext = document.getElementById('btnNext');
+            const btnSkip = document.getElementById('btnSkip');
+
+            const newNext = btnNext.cloneNode(true);
+            const newSkip = btnSkip.cloneNode(true);
+            btnNext.parentNode.replaceChild(newNext, btnNext);
+            btnSkip.parentNode.replaceChild(newSkip, btnSkip);
+
+            newNext.addEventListener('click', () => nextStep(true));
+            newSkip.addEventListener('click', () => nextStep(false));
+        }
+        await highlightCurrentRange();
+    }
+
+    async function nextStep(wasActionTaken) {
+        wizardState.currentIndex++;
+        if (wizardState.currentIndex >= wizardState.ranges.length) {
+            finishWizard();
+            return;
+        }
+        await highlightCurrentRange();
+    }
+
+    async function highlightCurrentRange() {
+        const range = wizardState.ranges[wizardState.currentIndex];
+        const index = wizardState.currentIndex + 1;
+        const total = wizardState.ranges.length;
+
+        // Update UI
+        document.getElementById('reviewStatus').textContent = `Silence ${index} of ${total}`;
+        document.getElementById('reviewTime').textContent = `${range.start.toFixed(1)}s - ${range.end.toFixed(1)}s`;
+
+        // Update Timeline
+        const { TickTime } = require('premierepro');
+        const project = await app.Project.getActiveProject();
+        const seq = await project.getActiveSequence();
+
+        const startTick = TickTime.createWithSeconds(range.start);
+        const endTick = TickTime.createWithSeconds(range.end);
+
+        await project.lockedAccess(async () => {
+            await project.executeTransaction((compoundAction) => {
+                if (seq.createSetInPointAction)
+                    compoundAction.addAction(seq.createSetInPointAction(startTick));
+                if (seq.createSetOutPointAction)
+                    compoundAction.addAction(seq.createSetOutPointAction(endTick));
+            });
+        });
+        seq.setPlayerPosition(startTick);
+    }
+
+    function finishWizard() {
+        document.getElementById('reviewSection').style.display = 'none';
+        document.querySelector('.input-wrapper').style.display = 'flex';
+        document.querySelector('.context-chips').style.display = 'flex';
+        alert("Review Complete! All segments processed.");
+    }
+
+    // ========================================================================
+    // FEATURE 2: TRANSITION RECOMMENDATION
+    // ========================================================================
+    
+    async function handleTransitionRecommendation() {
+        console.log("[DEBUG] --- Started Transition Recommendation Engine ---");
+    
+        try {
+            const project = await app.Project.getActiveProject();
+            if (!project) { console.error("[DEBUG] No Project"); return; }
+    
+            const sequence = await project.getActiveSequence();
+            if (!sequence) { console.error("[DEBUG] No Sequence"); return; }
+            
+            // 1. Get Track
+            const videoTrack = await sequence.getVideoTrack(0); 
+            if (!videoTrack) { console.error("[DEBUG] No V1 Track"); return; }
+    
+            // 2. Get Clips (Strict)
+            let clips;
+            let clipType = Constants && Constants.TrackItemType ? Constants.TrackItemType.CLIP : 1;
+            
+            try {
+                clips = await videoTrack.getTrackItems(clipType, 0); 
+            } catch (e) {
+                console.warn(`[DEBUG] API Error: ${e.message}`);
+                return;
+            }
+    
+            if (!clips || clips.length < 2) {
+                console.warn("[DEBUG] Not enough clips to analyze.");
+                return;
+            }
+    
+            console.log(`[DEBUG] Analyzing gaps between ${clips.length} clips...`);
+    
+            // 3. ANALYSIS LOOP
+            let cutIndex = 0;
+            
+            for (let i = 0; i < clips.length - 1; i++) {
+                const clipA = clips[i];
+                const clipB = clips[i + 1];
+    
+                // Inspect Time Objects
+                let tickEndA = clipA.getEndTime();
+                let tickStartB = clipB.getStartTime();
+    
+                if (tickEndA instanceof Promise) tickEndA = await tickEndA;
+                if (tickStartB instanceof Promise) tickStartB = await tickStartB;
+    
+                if (!tickEndA || !tickStartB) continue;
+    
+                // Extract Seconds
+                let endA = tickEndA.seconds;
+                let startB = tickStartB.seconds;
+    
+                if (typeof endA === 'undefined') endA = tickEndA.value ? tickEndA.value / 254016000000 : 0;
+                if (typeof startB === 'undefined') startB = tickStartB.value ? tickStartB.value / 254016000000 : 0;
+    
+                const gap = Math.abs(endA - startB);
+                
+                console.log(`[DEBUG] Pair ${i+1}: GAP=${Number(gap).toFixed(4)}s`);
+    
+                if (gap < 0.5) { 
+                    cutIndex++;
+                    console.log(`[DEBUG] >>> VALID CUT FOUND`);
+    
+                    // TIME CALCULATION
+                    const oneFrame = 1 / sequence.videoFrameRate;
+                    const timeA_Seconds = endA - oneFrame;
+                    const timeB_Seconds = startB;
+    
+                    // Create Valid TickTime Objects
+                    let exportTimeA, exportTimeB;
+    
+                    try {
+                        // Try the modern factory method first
+                        if (TickTime.createWithSeconds) {
+                            exportTimeA = await TickTime.createWithSeconds(timeA_Seconds);
+                            exportTimeB = await TickTime.createWithSeconds(timeB_Seconds);
+                        } else {
+                            // Fallback: Clone sequence Zero Point
+                            const zero = await sequence.getZeroPoint();
+                            exportTimeA = zero; exportTimeA.seconds = timeA_Seconds;
+                            exportTimeB = zero; exportTimeB.seconds = timeB_Seconds;
+                        }
+                    } catch(err) {
+                        console.error("[DEBUG] Time creation failed:", err);
+                        continue; 
+                    }
+    
+                    // EXPORT
+                    await uxpExportFrame(sequence, exportTimeA, `Cut${cutIndex}_FrameA`);
+                    await uxpExportFrame(sequence, exportTimeB, `Cut${cutIndex}_FrameB`);
+                }
+            }
+    
+            console.log("[DEBUG] --- Analysis Complete ---");
+    
+        } catch (err) {
+            console.error("[DEBUG] CRITICAL ERROR:", err);
+        }
+    }
+        
+
+    // ========================================================================
+    // FEATURE 3: AUDIO SYNC 
+    // ========================================================================
+
+    async function handleAudioSync() {
+        console.log("--- Starting Feature 3: Audio Sync ---");
+        const mainDisplay = document.getElementById('mainDisplay');
+
+        mainDisplay.innerHTML = `
+            <div style="text-align: center; padding: 20px; color: white;">
+                <h2>Audio Sync</h2>
+                <p>Feature coming soon...</p>
+            </div>
+        `;
+
+        // [COMMAND]: PUT YOUR AUDIO SYNC LOGIC HERE
+        // 1. Export Audio A & B
+        // 2. Send to AI
+        // 3. Move Clip
+    }
+
+}); // --- END OF DOMContentLoaded ---
+
+// ============================================================================
+// CORE HELPERS (Must be outside Event Listener)
+// ============================================================================
     async function exportAudioForAnalysis() {
         console.log("--- 1. Function Started (Using EncoderManager) ---");
 
-        // 1. GET PROJECT & SEQUENCE
+        // Get project sequence
         const project = await app.Project.getActiveProject();
         if (!project) throw new Error("No open project.");
 
@@ -244,13 +402,12 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!seq) throw new Error("No active sequence. Click the timeline!");
         console.log("--- 2. Found Sequence: " + seq.name + " ---");
 
-        // 2. SETUP PATHS
+        // Setup path
         const fs = require('uxp').storage.localFileSystem;
         const tempFolder = await fs.getTemporaryFolder();
         const tempFile = await tempFolder.createFile("ai_analysis_audio.wav", { overwrite: true });
 
         let tempPath = tempFile.nativePath;
-        // Windows Fix: Swap / for \
         const isWindows = navigator.platform.indexOf('Win') > -1;
         if (isWindows) tempPath = tempPath.replace(/\//g, '\\');
         console.log("--- 3. Target Path: " + tempPath);
@@ -267,16 +424,14 @@ document.addEventListener("DOMContentLoaded", () => {
             throw new Error("WAV.epr not found in plugin folder.");
         }
 
-        // 4. GET MANAGER & EXPORT
         console.log("--- 5. Getting Encoder Manager... ---");
         const encoderMgr = await EncoderManager.getManager();
 
         console.log("--- 6. Starting Export... ---");
 
-        // Documentation: exportSequence(sequence, exportType, outputFile, presetFile, exportFull)
         const jobID = await encoderMgr.exportSequence(
             seq,
-            Constants.ExportType.IMMEDIATELY, // Export now (don't queue)
+            Constants.ExportType.IMMEDIATELY, 
             tempPath,
             presetPath,
             1 // 1 = Export Full Sequence (0 would be Work Area)
@@ -284,145 +439,130 @@ document.addEventListener("DOMContentLoaded", () => {
 
         console.log("--- 7. Export Started! Job ID: " + jobID);
 
-        // Wait for file to appear (since export is async)
         await new Promise(r => setTimeout(r, 2000));
 
         return tempPath;
     }
 
-    // --- STATE MANAGEMENT ---
-    let wizardState = {
-        ranges: [],
-        currentIndex: 0
-    };
-
-    // --- HELPER 2: START REVIEW WIZARD ---
-    async function performTrimSilence(silentRanges) {
-        console.log("--- Starting Review Wizard ---");
-
-        // 1. Save Data & Reset State
-        // We reverse them so the user cuts from the end (safer for ripple edits)
-        wizardState.ranges = [...silentRanges].reverse();
-        wizardState.currentIndex = 0;
-
-        // 2. Show the UI
-        const reviewSection = document.getElementById('reviewSection');
-        const inputWrapper = document.querySelector('.input-wrapper');
-        const chips = document.querySelector('.context-chips');
-
-        if (reviewSection) {
-            reviewSection.style.display = 'flex';
-            // Hide other controls to focus the user
-            if (inputWrapper) inputWrapper.style.display = 'none';
-            if (chips) chips.style.display = 'none';
-
-            // Setup Buttons (Remove old listeners to prevent duplicates)
-            const btnNext = document.getElementById('btnNext');
-            const btnSkip = document.getElementById('btnSkip');
-
-            // Clone and replace to clear old listeners (simple trick)
-            const newNext = btnNext.cloneNode(true);
-            const newSkip = btnSkip.cloneNode(true);
-            btnNext.parentNode.replaceChild(newNext, btnNext);
-            btnSkip.parentNode.replaceChild(newSkip, btnSkip);
-
-            // Add Logic
-            newNext.addEventListener('click', () => nextStep(true));
-            newSkip.addEventListener('click', () => nextStep(false));
+    async function waitForFileCreation(fs, folder, filename) { // <--- Make sure 'async' is here!
+        let attempts = 0;
+        while (attempts < 20) {
+            try {
+                await folder.getEntry(filename);
+                return;
+            } catch (e) {
+                // Not found yet
+            }
+            await new Promise(r => setTimeout(r, 500));
+            attempts++;
         }
-
-        // 3. Highlight the First One
-        await highlightCurrentRange();
+        throw new Error("Export timed out. File was not created.");
     }
 
-
-    // --- WIZARD STEP LOGIC ---
-    async function nextStep(wasActionTaken) {
-        // Move to next item
-        wizardState.currentIndex++;
-
-        // Check if finished
-        if (wizardState.currentIndex >= wizardState.ranges.length) {
-            finishWizard();
-            return;
-        }
-
-        // Highlight the next one
-        await highlightCurrentRange();
-    }
-
-    async function highlightCurrentRange() {
-        const range = wizardState.ranges[wizardState.currentIndex];
-        const index = wizardState.currentIndex + 1;
-        const total = wizardState.ranges.length;
-
-        // 1. Update UI Text
-        document.getElementById('reviewStatus').textContent = `Silence ${index} of ${total}`;
-        document.getElementById('reviewTime').textContent = `${range.start.toFixed(1)}s - ${range.end.toFixed(1)}s`;
-
-        // 2. Set In/Out Points (The Visual Proof)
-        const { TickTime } = require('premierepro');
-        const project = await app.Project.getActiveProject();
-        const seq = await project.getActiveSequence();
-
-        const startTick = TickTime.createWithSeconds(range.start);
-        const endTick = TickTime.createWithSeconds(range.end);
-
-        await project.lockedAccess(async () => {
-            await project.executeTransaction((compoundAction) => {
-                if (seq.createSetInPointAction)
-                    compoundAction.addAction(seq.createSetInPointAction(startTick));
-                if (seq.createSetOutPointAction)
-                    compoundAction.addAction(seq.createSetOutPointAction(endTick));
-            });
-        });
-
-        // 3. Move Playhead
-        seq.setPlayerPosition(startTick);
-    }
-
-    function finishWizard() {
-        // Reset UI
-        document.getElementById('reviewSection').style.display = 'none';
-        document.querySelector('.input-wrapper').style.display = 'flex';
-        document.querySelector('.context-chips').style.display = 'flex';
-
-        // Clear In/Out
-        alert("Review Complete! All segments processed.");
-    }
-
-}); // --- END OF DOMContentLoaded ---
-
-
-// --- HELPER FUNCTIONS (MUST BE OUTSIDE DOM LISTENER) ---
-
-/**
- * Helper: Wait until the file actually appears on disk
- */
-async function waitForFileCreation(fs, folder, filename) { // <--- Make sure 'async' is here!
-    let attempts = 0;
-    while (attempts < 20) {
+    /**
+     * HELPER: Exports a single frame using Strict UXP (No QE)
+     * @param {Sequence} sequence - The active sequence
+     * @param {TickTime} tickTimeObj - The specific time to capture
+     * @param {String} fileNameSuffix - Suffix for the filename (e.g., "FrameA")
+     */
+   /**
+    * HELPER: Exports a single frame using Strict UXP (No QE)
+    */
+    async function uxpExportFrame(sequence, tickTimeObj, fileNameSuffix) {
         try {
-            await folder.getEntry(filename);
-            return;
-        } catch (e) {
-            // Not found yet
+            // 1. Get Project Path
+            const project = await app.Project.getActiveProject();
+            let projectPath = project.path;
+    
+            if (!projectPath || projectPath.length === 0) {
+                console.warn("[DEBUG] Project not saved! Saving to Temp folder instead.");
+                return await uxpExportFrameToTemp(sequence, tickTimeObj, fileNameSuffix);
+            }
+    
+            // 2. Clean Path & Directory Parsing
+            if (projectPath.startsWith("\\\\?\\")) projectPath = projectPath.substring(4);
+    
+            const lastBackSlash = projectPath.lastIndexOf("\\");
+            const lastForwardSlash = projectPath.lastIndexOf("/");
+            const lastSlashIndex = Math.max(lastBackSlash, lastForwardSlash);
+            
+            let projectDir = "";
+            
+            if (lastSlashIndex > -1) {
+                projectDir = projectPath.substring(0, lastSlashIndex);
+            } else {
+                console.error(`[DEBUG] Could not parse directory from: ${projectPath}`);
+                return;
+            }
+    
+            // 3. Construct NAME Only
+            const safeFileName = `Preview_${fileNameSuffix}.png`;
+            console.log(`[DEBUG] Exporting: ${safeFileName} into ${projectDir}`);
+    
+            // 4. GET FRAME SIZE (Dynamic Resolution Fix)
+            let width = 1920;
+            let height = 1080;
+            
+            try {
+                const frameSize = await sequence.getFrameSize();
+                if (frameSize) {
+                    width = frameSize.width || (frameSize.right - frameSize.left) || 1920;
+                    height = frameSize.height || (frameSize.bottom - frameSize.top) || 1080;
+                    // Ensure Integers
+                    width = Math.round(width);
+                    height = Math.round(height);
+                }
+            } catch(e) {}
+    
+            // 5. EXECUTE EXPORT
+            // FIX: Passing "safeFileName" (Just Name) + "projectDir" (Directory)
+            const result = await Exporter.exportSequenceFrame(
+                sequence,
+                tickTimeObj,
+                safeFileName,   // JUST THE NAME
+                projectDir,     // THE DIRECTORY
+                width,          
+                height          
+            );
+    
+            console.log(`[DEBUG] Export Result: ${result}`);
+    
+            // 6. VERIFY
+            await new Promise(r => setTimeout(r, 1000));
+    
+            if (result === true || result === "true") {
+                 console.log(`[DEBUG] SUCCESS!`);
+                 console.log(`[DEBUG] Check your project folder: ${projectDir}`);
+            } else {
+                 console.error(`[DEBUG] Export returned false.`);
+            }
+    
+        } catch (error) {
+            console.error(`[DEBUG] FAILED to export ${fileNameSuffix}`);
+            console.error(`[DEBUG] Reason: ${error.message || JSON.stringify(error)}`);
         }
-        await new Promise(r => setTimeout(r, 500));
-        attempts++;
     }
-    throw new Error("Export timed out. File was not created.");
-}
-
-/**
- * Snaps a time in seconds to the nearest video frame.
- * This prevents 0.01s gaps caused by sub-frame audio edits.
- * @param {number} seconds - The raw time from Python
- * @param {number} fps - The sequence frame rate (default 23.976)
- * @returns {number} - The snapped time in seconds
- */
-function snapToFrame(seconds, fps) {
-    const frameDuration = 1.0 / fps;
-    const frameCount = Math.round(seconds * fps);
-    return frameCount * frameDuration;
-}
+    
+    // Fallback function needs update too
+    async function uxpExportFrameToTemp(sequence, tickTimeObj, fileNameSuffix) {
+        const tempFolder = await fs.getTemporaryFolder();
+        const filename = `Preview_${fileNameSuffix}.png`;
+        const tempFile = await tempFolder.createFile(filename, { overwrite: true });
+        let nativePath = tempFile.nativePath;
+        const isWindows = navigator.platform.indexOf('Win') > -1;
+        if (isWindows) nativePath = nativePath.replace(/\//g, '\\');
+        let parentDir = nativePath.substring(0, nativePath.lastIndexOf(isWindows ? "\\" : "/"));
+    
+        let width = 1920;
+        let height = 1080;
+        try {
+            const frameSize = await sequence.getFrameSize();
+            if (frameSize) {
+                width = Math.round(frameSize.width || 1920);
+                height = Math.round(frameSize.height || 1080);
+            }
+        } catch(e) {}
+    
+        console.log(`[DEBUG] Saving to Temp: ${nativePath}`);
+        await Exporter.exportSequenceFrame(sequence, tickTimeObj, filename, parentDir, width, height);
+    }
