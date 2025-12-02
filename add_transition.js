@@ -158,7 +158,7 @@ async function transitionEncoder(sequence) {
             if (typeof endSeconds === 'undefined') endSeconds = tickEnd.value ? tickEnd.value / 254016000000 : 0;
 
             // Subtract 1 frame to get the actual last visible frame
-            const oneFrame = 1 / sequence.videoFrameRate;
+            const oneFrame = 1 / 30; // 30 FPS (maybe can change using framerate property at adobe uxp documentation)
             let lastFrameSeconds = endSeconds - oneFrame;
             if (lastFrameSeconds < 0) lastFrameSeconds = 0;
 
