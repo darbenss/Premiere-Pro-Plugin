@@ -78,9 +78,9 @@ class IntentRequest(BaseModel):
 class ToolsRequest(BaseModel):
     session_id: str # = Field(default_factory=lambda: str(uuid.uuid4()))
     message: str
-    audio_file_path: Optional[str] = None
-    image_transition_path: Optional[List[List[str]]] = None
-    sync_lips: Optional[bool] = False                   # To be changed
+    audio_file_path: Optional[str] = None                       # Trim Silence
+    image_transition_path: Optional[List[List[str]]] = None     # Add Transition
+    sync_lips: Optional[bool] = False                           # Sync Lips (TBC)
 
 class ToolCommand(BaseModel):
     action: str
@@ -89,7 +89,7 @@ class ToolCommand(BaseModel):
 class ChatResponse(BaseModel):
     session_id: str # Return ID so client can store it
     response_text: str
-    command: Optional[ToolCommand] = None
+    commands: Optional[List[ToolCommand]] = None
 
 class IntentResponse(BaseModel):
     trim_silence: bool = False
@@ -322,31 +322,35 @@ async def chat_endpoint(request: ToolsRequest):
     # Logic to find the LAST successful tool execution to send back to UXP
     # Note: If multiple tools ran, this logic picks the last one. 
     # If you need to return multiple commands, 'uxp_command' needs to be a list in your Pydantic model.
-    uxp_command = None
+    collected_actions = {}
     
+    # We loop REVERSED to get the *latest* execution of a tool first.
     for msg in reversed(messages):
         if isinstance(msg, ToolMessage):
             try:
                 data = json.loads(msg.content)
                 action_type = data.get("action_type")
                 
-                if action_type == "trim_silence":
-                    uxp_command = ToolCommand(action="trim_silence", payload=data)
-                    break 
-                elif action_type == "add_transition":
-                    uxp_command = ToolCommand(action="add_transition", payload=data)
-                    break
-                elif action_type == "sync_lips":
-                    uxp_command = ToolCommand(action="sync_lips", payload=data)
-                    break
+                # Check if it's a valid known tool
+                if action_type in ["trim_silence", "add_transition", "sync_lips"]:
                     
+                    # ONLY add if we haven't seen this action_type yet
+                    if action_type not in collected_actions:
+                        collected_actions[action_type] = ToolCommand(
+                            action=action_type, 
+                            payload=data
+                        )
+                        
             except json.JSONDecodeError:
                 continue
+
+    # Convert the dictionary values to a list
+    final_commands = list(collected_actions.values())
 
     return ChatResponse(
         session_id=request.session_id,
         response_text=str(bot_text),
-        command=uxp_command
+        commands=final_commands # Returns list like: [TrimCommand, TransitionCommand]
     )
 
 if __name__ == "__main__":
