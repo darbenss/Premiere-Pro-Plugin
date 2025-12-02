@@ -1,5 +1,6 @@
 import os
 import json
+import base64
 import sqlite3
 from var import OPENROUTER_API_KEY, OPENROUTER_BASE_URL, OPENROUTER_MODEL
 import uuid
@@ -8,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from tools.trim_silence import trim_silence_tool
+from tools.add_transition import add_transition_tool
 
 # LangChain & LangGraph
 from langchain_openai import ChatOpenAI
@@ -32,7 +34,7 @@ llm = ChatOpenAI(
 )
 
 # 2. Bind Tools
-tools = [trim_silence_tool]
+tools = [trim_silence_tool, add_transition_tool]
 llm_with_tools = llm.bind_tools(tools)
 
 # 3. Define Nodes
@@ -95,6 +97,23 @@ class IntentResponse(BaseModel):
     sync_lips: bool = False
     immediate_reply: Optional[str] = None
     
+# --- SYSTEM PROMPT ---
+system_prompt = (
+    """You are an AI Assistant for Adobe Premiere Pro. 
+    You can chat normally or use tools to edit video. 
+    RULES for Tools:
+    1. 'trim_silence_tool': Use for silence removal.
+    2. 'add_transition_tool': Use when user wants to add transitions. 
+    3. 'sync_lips_tool': For synchronizing audio/video.
+    
+    RULES for 'add_transition_tool':
+        1. You will receive multiple images representing sequential cuts.
+        2. You must generate a LIST of 'target_vibes' strings, one for each cut.
+            - Input 'target_vibes_json': A JSON string list. Example: '["slow dissolve", "fast glitch"]'
+        3. Input 'img_paths_json': COPY the exact JSON string provided in context.
+        4. If the cuts look similar, you can repeat the vibe in the list.
+        5. If the cuts are drastically different, use different vibes for each index."""
+)
 
 intent_system_prompt = SystemMessage(content="""
     You are the "Intent Classifier" for an Adobe Premiere Pro AI Agent.
@@ -132,21 +151,34 @@ intent_system_prompt = SystemMessage(content="""
     Provide ONLY the raw JSON object. Do not use Markdown formatting (```json).
     """)
 
+# --- HELPER FUNCTIONS ---
+def encode_image(image_path):
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode('utf-8')
+
 def get_intent(human_messages: str, config):
+    # READ ONLY: Fetch history from the Graph's memory
+    current_state = graph.get_state(config)
+    history = current_state.values.get("messages", [])
+    
+    recent_history = history[-5:] 
+    
     messages = [
         intent_system_prompt,
+        *recent_history, 
         HumanMessage(content=human_messages)
     ]
+
     chain = (
         messages
         | llm
         | {"result": lambda x: x.content}
     )
-    result = chain.invoke()
-    print(result)
+
+    result = chain.invoke(config=config)
+    print(f"DEBUG Intent: {result}")
     try:
-        result = json.loads(result)
-        return result
+        return json.loads(result)
     except json.JSONDecodeError:
         raise HTTPException(status_code=500, detail="Not a valid JSON response.")
     
@@ -193,36 +225,75 @@ async def chat_endpoint(request: ToolsRequest):
 
     # Only add System Prompt if this is a NEW conversation
     if not existing_messages:
-        system_prompt = (
-            "You are an AI Assistant for Adobe Premiere Pro. "
-            "You can chat normally or use tools to edit video. "
-            "Use 'trim_silence_tool' for silence removal. "
-            "Use 'add_transition_tool' for adding transitions between clips. "
-            "Use 'sync_lips_tool' for synchronizing audio/video. "
-            "Always confirm when you have completed an action."
-        )
         input_messages.append(SystemMessage(content=system_prompt))
     
     # 3. Add Context dynamically based on what the Frontend sent
-    user_msg_content = request.message
+    text_content = f"User Request: {request.message}\n"
     
     context_parts = []
+    
+    # Context for Trim Silence
     if request.audio_file_path:
         context_parts.append(f"Audio Path: {request.audio_file_path}")
     
+    # Context for Add Transition (The Paths)
     if request.image_transition_path:
-        # Flattening logic might be needed depending on how your agent reads it, 
-        # but here we pass the raw structure clearly.
-        context_parts.append(f"Transition Clips: {request.image_transition_path}")
+        paths_str = json.dumps(request.image_transition_path)
+        context_parts.append(f"Transition Clips JSON: {paths_str}")
+        context_parts.append("(See attached images for visual context of these clips)")
 
+    # Context for Lip Sync
     if request.sync_lips:
         context_parts.append("Requesting Lip Sync: True")
 
+    # Combine text parts
     if context_parts:
-        user_msg_content += "\n\n[System Context Data]:\n" + "\n".join(context_parts)
+        text_content += "\n\n[System Context Data]:\n" + "\n".join(context_parts)
+
+    print(f"DEBUG TEXT INPUT: {text_content}") 
+
+    # --- Part B: Build the Message Payload ---
     
-    print(f"DEBUG INPUT: {user_msg_content}") # Helpful for debugging
-    input_messages.append(HumanMessage(content=user_msg_content))
+    message_content = []
+    
+    # 1. Add the Text Block first
+    message_content.append({"type": "text", "text": text_content})
+    
+    # 2. Add Image Blocks
+    # This allows the AI to "see" the clips to determine the Vibe
+    # Safety check: Need at least 2 clips to have a transition
+    if len(clips) >= 2:
+        try:
+            # Loop through every connection (Cut 1, Cut 2, etc.)
+            for i in range(len(clips) - 1):
+                outgoing_clip_tail = clips[i][1]      # End of Clip A
+                incoming_clip_head = clips[i+1][0]    # Start of Clip B
+                
+                # We load BOTH images for this specific cut
+                for img_path in [outgoing_clip_tail, incoming_clip_head]:
+                    base64_image = encode_image(img_path)
+                    
+                    # We add a small detail note so the AI knows which cut this is
+                    message_content.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}",
+                            "detail": "low" # 'low' is cheaper/faster, 'high' for better analysis
+                        }
+                    })
+            
+            # Add a text hint to explain the image order to the LLM
+            message_content.append({
+                "type": "text", 
+                "text": f"[System Note]: The images above represent {len(clips)-1} cut points. They are ordered sequentially: Cut 1 Out, Cut 1 In, Cut 2 Out, Cut 2 In..."
+            })
+
+        except Exception as e:
+            print(f"Error loading images: {e}")
+            # Don't crash, just proceed with text only
+
+    # 3. Create the final HumanMessage
+    input_messages.append(HumanMessage(content=message_content))
 
     # 4. Run Graph
     try:
