@@ -117,19 +117,19 @@ def vector_search(query_vibe):
 # --- ENDPOINTS ---
 
 @tool
-def add_transition_tool(target_vibes_json: str, img_paths_json: str):
+def add_transition_tool(target_vibes_json: str, durations_json: str, img_paths_json: str):
     """
-    Generates a SEQUENCE of transitions.
+    Generates a SEQUENCE of transitions with specific vibes and durations.
     
     Args:
-        target_vibes_json (str): A JSON string containing a LIST of vibe strings.
-                                 Example: '["slow dissolve", "fast glitch", "smooth zoom"]'
-                                 The list length should ideally match the number of cuts (N-1).
+        target_vibes_json (str): JSON string list of vibe strings (e.g. '["glitch", "dissolve"]').
+        durations_json (str): JSON string list of float seconds (e.g. '[0.5, 1.5]').
         img_paths_json (str): The JSON string of the list of clips.
     """
     try:
         clips = json.loads(img_paths_json)
         vibes = json.loads(target_vibes_json)
+        durations = json.loads(durations_json)
     except Exception as e:
         return json.dumps({"error": f"Invalid JSON format: {str(e)}"})
 
@@ -157,6 +157,9 @@ def add_transition_tool(target_vibes_json: str, img_paths_json: str):
     for i in range(num_cuts):
         # 1. Get the specific vibe for THIS cut
         current_vibe = vibes[i]
+
+        raw_duration = float(durations[i])
+        current_duration = max(0.1, min(raw_duration, 2.0))
         
         # 3. Search Vector DB with the specific vibe
         print(f"   [Cut {i}] Searching for: '{current_vibe}'")
@@ -166,6 +169,7 @@ def add_transition_tool(target_vibes_json: str, img_paths_json: str):
         transitions_sequence.append({
             "cut_index": i,
             "transition_name": best_match_key,
+            "duration": current_duration,
             "vibe_used": current_vibe
         })
 

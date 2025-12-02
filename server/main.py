@@ -101,18 +101,25 @@ class IntentResponse(BaseModel):
 system_prompt = (
     """You are an AI Assistant for Adobe Premiere Pro. 
     You can chat normally or use tools to edit video. 
+    
     RULES for Tools:
     1. 'trim_silence_tool': Use for silence removal.
     2. 'add_transition_tool': Use when user wants to add transitions. 
     3. 'sync_lips_tool': For synchronizing audio/video.
     
     RULES for 'add_transition_tool':
-        1. You will receive multiple images representing sequential cuts.
-        2. You must generate a LIST of 'target_vibes' strings, one for each cut.
-            - Input 'target_vibes_json': A JSON string list. Example: '["slow dissolve", "fast glitch"]'
-        3. Input 'img_paths_json': COPY the exact JSON string provided in context.
-        4. If the cuts look similar, you can repeat the vibe in the list.
-        5. If the cuts are drastically different, use different vibes for each index."""
+    1. You will receive multiple images representing sequential cuts.
+    2. You must generate TWO lists: one for 'vibes' and one for 'durations' (seconds).
+    3. Input 'target_vibes_json': A JSON string list of styles. 
+       - Example: '["slow dissolve", "fast glitch"]'
+    4. Input 'durations_json': A JSON string list of floats (Max 2.0 seconds).
+       - REASONING GUIDE:
+         - Fast/Glitchy/Action -> Short duration (0.2 - 0.5s)
+         - Smooth/Dreamy/Sad -> Long duration (1.0 - 2.0s)
+         - Standard Cut -> Medium duration (0.5 - 1.0s)
+       - Example: '[1.0, 0.2]'
+    5. Input 'img_paths_json': COPY the exact JSON string provided in context.
+    6. Ensure the length of the lists matches the number of cuts."""
 )
 
 intent_system_prompt = SystemMessage(content="""
