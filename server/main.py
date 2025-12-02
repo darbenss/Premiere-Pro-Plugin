@@ -13,7 +13,7 @@ from tools.add_transition import add_transition_tool
 
 # LangChain & LangGraph
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, ToolMessage, HumanMessage, 
+from langchain_core.messages import SystemMessage, ToolMessage, HumanMessage
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph, MessagesState, START
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -261,38 +261,45 @@ async def chat_endpoint(request: ToolsRequest):
     
     # 2. Add Image Blocks
     # This allows the AI to "see" the clips to determine the Vibe
-    # Safety check: Need at least 2 clips to have a transition
-    if len(clips) >= 2:
-        try:
-            # Loop through every connection (Cut 1, Cut 2, etc.)
-            for i in range(len(clips) - 1):
-                outgoing_clip_tail = clips[i][1]      # End of Clip A
-                incoming_clip_head = clips[i+1][0]    # Start of Clip B
-                
-                # We load BOTH images for this specific cut
-                for img_path in [outgoing_clip_tail, incoming_clip_head]:
-                    base64_image = encode_image(img_path)
+    if request.image_transition_path:
+        clips = request.image_transition_path
+        
+        # Safety check: Need at least 2 clips to have a transition
+        if len(clips) >= 2:
+            try:
+                for i in range(len(clips) - 1):
+                    current_clip = clips[i]
+                    next_clip = clips[i+1]
+
+                    # SAFETY CHECK: Ensure clips aren't empty lists
+                    if not current_clip or not next_clip:
+                        print(f"Skipping empty clip data at index {i}")
+                        continue
+
+                    outgoing_clip_tail = current_clip[-1] # Always gets the last frame
+                    incoming_clip_head = next_clip[0]     # Always gets the first frame
                     
-                    # We add a small detail note so the AI knows which cut this is
-                    message_content.append({
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64_image}",
-                            "detail": "low" # 'low' is cheaper/faster, 'high' for better analysis
-                        }
-                    })
-            
-            # Add a text hint to explain the image order to the LLM
-            message_content.append({
-                "type": "text", 
-                "text": f"[System Note]: The images above represent {len(clips)-1} cut points. They are ordered sequentially: Cut 1 Out, Cut 1 In, Cut 2 Out, Cut 2 In..."
-            })
+                    # We load BOTH images for this specific cut
+                    for img_path in [outgoing_clip_tail, incoming_clip_head]:
+                        base64_image = encode_image(img_path)
+                        
+                        message_content.append({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}",
+                                "detail": "low" # 'low' is cheaper/faster, 'high' for better analysis
+                            }
+                        })
+                
+                message_content.append({
+                    "type": "text", 
+                    "text": f"[System Note]: The images above represent {len(clips)-1} cut points. They are ordered sequentially: Cut 1 Out, Cut 1 In, Cut 2 Out, Cut 2 In..."
+                })
 
-        except Exception as e:
-            print(f"Error loading images: {e}")
-            # Don't crash, just proceed with text only
-
-    # 3. Create the final HumanMessage
+            except Exception as e:
+                print(f"Error loading images: {e}")
+                # Don't crash, just proceed with text only
+    
     input_messages.append(HumanMessage(content=message_content))
 
     # 4. Run Graph

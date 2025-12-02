@@ -3,7 +3,6 @@ import json
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage
 from fastapi import HTTPException
-from main import graph, llm
 from var import OPENROUTER_API_KEY
 
 # Ensure directory exists or handle error if needed
@@ -46,6 +45,7 @@ def img_path_parser(img_path: list[list[str]]):
 # --- DUMMY AI LOGIC ---
 def ai_vibe_transition(session_id: str, img_path: list[list[str]], human_messages: str):
     """Simulates the VLM analyzing images."""
+    from main import graph, llm             # To resolve circular import
     print(f"🤖 AI: Analyzing frames...")
 
     img_parsed = img_path_parser(img_path)
@@ -157,10 +157,6 @@ def add_transition_tool(target_vibes_json: str, img_paths_json: str):
     for i in range(num_cuts):
         # 1. Get the specific vibe for THIS cut
         current_vibe = vibes[i]
-
-        # 2. Identify frames
-        outgoing_clip_tail = clips[i][1]
-        incoming_clip_head = clips[i+1][0]
         
         # 3. Search Vector DB with the specific vibe
         print(f"   [Cut {i}] Searching for: '{current_vibe}'")

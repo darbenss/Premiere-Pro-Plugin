@@ -5,6 +5,7 @@ build/
 dist/
 wheels/
 *.egg-info
+server/checkpoints.sqlite
 
 # Virtual environments
 .venv
