@@ -2,9 +2,35 @@
 //  GLOBAL IMPORTS & CONSTANTS
 // ============================================================================
 const app = require('premierepro');
-const { Constants, EncoderManager, TickTime, Marker, Markers, CompoundAction, Exporter } = require('premierepro');
+const { Constants, EncoderManager, TickTime, Marker, Markers, CompoundAction, Exporter, TransitionFactory, AddTransitionOptions} = require('premierepro');
 const { storage } = require("uxp");
 const fs = storage.localFileSystem;
+
+// Mock AI Data (Simulating your partner's JSON structure)
+const MOCK_AI_RESPONSE = {
+    "session_id": "1234567890",
+    "response_text": "All set. I added transitions...",
+    "command": {
+        "action": "add_transition",
+        "payload": {
+            "action_type": "add_transition",
+            "transitions": [
+                {
+                    "cut_index": 0, // Note: AI uses 0-based index here based on your example
+                    "transition_name": "AE.ADBE Cross Dissolve New",
+                    "vibe_used": "cross dissolve",
+                    "duration" : 2
+                },
+                {
+                    "cut_index": 1,
+                    "transition_name": "AE.ADBE Dip To Black", // Changed to a standard one for testing consistency
+                    "vibe_used": "glitch morph",
+                    "duration" : 1
+                }
+            ]
+        }
+    }
+};
 
 // Global State for the Wizard
 let wizardState = {
@@ -59,7 +85,6 @@ document.addEventListener("DOMContentLoaded", () => {
             sendBtn.click();
         }
     });
-
 
     // ========================================================================
     //  FEATURE 1: TRIM SILENCE (Logic & Wizard)
@@ -265,106 +290,159 @@ document.addEventListener("DOMContentLoaded", () => {
     // ========================================================================
     
     async function handleTransitionRecommendation() {
-        console.log("[DEBUG] --- Started Transition Recommendation Engine ---");
-    
-        try {
-            const project = await app.Project.getActiveProject();
-            if (!project) { console.error("[DEBUG] No Project"); return; }
-    
-            const sequence = await project.getActiveSequence();
-            if (!sequence) { console.error("[DEBUG] No Sequence"); return; }
-            
-            // 1. Get Track
-            const videoTrack = await sequence.getVideoTrack(0); 
-            if (!videoTrack) { console.error("[DEBUG] No V1 Track"); return; }
-    
-            // 2. Get Clips (Strict)
-            let clips;
-            let clipType = Constants && Constants.TrackItemType ? Constants.TrackItemType.CLIP : 1;
-            
-            try {
-                clips = await videoTrack.getTrackItems(clipType, 0); 
-            } catch (e) {
-                console.warn(`[DEBUG] API Error: ${e.message}`);
-                return;
-            }
-    
-            if (!clips || clips.length < 2) {
-                console.warn("[DEBUG] Not enough clips to analyze.");
-                return;
-            }
-    
-            console.log(`[DEBUG] Analyzing gaps between ${clips.length} clips...`);
-    
-            // 3. ANALYSIS LOOP
-            let cutIndex = 0;
-            
-            for (let i = 0; i < clips.length - 1; i++) {
-                const clipA = clips[i];
-                const clipB = clips[i + 1];
-    
-                // Inspect Time Objects
-                let tickEndA = clipA.getEndTime();
-                let tickStartB = clipB.getStartTime();
-    
-                if (tickEndA instanceof Promise) tickEndA = await tickEndA;
-                if (tickStartB instanceof Promise) tickStartB = await tickStartB;
-    
-                if (!tickEndA || !tickStartB) continue;
-    
-                // Extract Seconds
-                let endA = tickEndA.seconds;
-                let startB = tickStartB.seconds;
-    
-                if (typeof endA === 'undefined') endA = tickEndA.value ? tickEndA.value / 254016000000 : 0;
-                if (typeof startB === 'undefined') startB = tickStartB.value ? tickStartB.value / 254016000000 : 0;
-    
-                const gap = Math.abs(endA - startB);
-                
-                console.log(`[DEBUG] Pair ${i+1}: GAP=${Number(gap).toFixed(4)}s`);
-    
-                if (gap < 0.5) { 
-                    cutIndex++;
-                    console.log(`[DEBUG] >>> VALID CUT FOUND`);
-    
-                    // TIME CALCULATION
-                    const oneFrame = 1 / sequence.videoFrameRate;
-                    const timeA_Seconds = endA - oneFrame;
-                    const timeB_Seconds = startB;
-    
-                    // Create Valid TickTime Objects
-                    let exportTimeA, exportTimeB;
-    
-                    try {
-                        // Try the modern factory method first
-                        if (TickTime.createWithSeconds) {
-                            exportTimeA = await TickTime.createWithSeconds(timeA_Seconds);
-                            exportTimeB = await TickTime.createWithSeconds(timeB_Seconds);
-                        } else {
-                            // Fallback: Clone sequence Zero Point
-                            const zero = await sequence.getZeroPoint();
-                            exportTimeA = zero; exportTimeA.seconds = timeA_Seconds;
-                            exportTimeB = zero; exportTimeB.seconds = timeB_Seconds;
-                        }
-                    } catch(err) {
-                        console.error("[DEBUG] Time creation failed:", err);
-                        continue; 
-                    }
-    
-                    // EXPORT
-                    await uxpExportFrame(sequence, exportTimeA, `Cut${cutIndex}_FrameA`);
-                    await uxpExportFrame(sequence, exportTimeB, `Cut${cutIndex}_FrameB`);
+       console.log("[DEBUG] --- Started Transition Recommendation Engine ---");
+   
+       try {
+           const project = await app.Project.getActiveProject();
+           if (!project) { console.error("[DEBUG] No Project"); return; }
+   
+           const sequence = await project.getActiveSequence();
+           if (!sequence) { console.error("[DEBUG] No Sequence"); return; }
+           
+           // 1. Get Track
+           const videoTrack = await sequence.getVideoTrack(0); 
+           if (!videoTrack) { console.error("[DEBUG] No V1 Track"); return; }
+   
+           // 2. Get Clips (Strict)
+           let rawClips;
+           let clipType = Constants && Constants.TrackItemType ? Constants.TrackItemType.CLIP : 1;
+           
+           try {
+               rawClips = await videoTrack.getTrackItems(clipType, 0); 
+           } catch (e) {
+               console.warn(`[DEBUG] API Error: ${e.message}`);
+               return;
+           }
+   
+           if (!rawClips || rawClips.length < 2) {
+               console.warn("[DEBUG] Not enough clips to analyze.");
+               return;
+           }
+   
+           // --- SORT CLIPS BY START TIME ---
+           const clips = rawClips.sort((a, b) => {
+               const startA = a.getStartTime().seconds || 0;
+               const startB = b.getStartTime().seconds || 0;
+               return startA - startB;
+           });
+   
+           console.log(`[DEBUG] Analyzing gaps between ${clips.length} sorted clips...`);
+   
+           // 3. ANALYSIS LOOP
+           let detectedCuts = [];
+           let cutIndex = 0;
+           
+           for (let i = 0; i < clips.length - 1; i++) {
+               const clipA = clips[i];
+               const clipB = clips[i + 1];
+   
+               // Inspect Time Objects
+               let tickEndA = clipA.getEndTime();
+               let tickStartB = clipB.getStartTime();
+   
+               if (tickEndA instanceof Promise) tickEndA = await tickEndA;
+               if (tickStartB instanceof Promise) tickStartB = await tickStartB;
+   
+               if (!tickEndA || !tickStartB) continue;
+   
+               // Extract Seconds (Handle Ticks vs Seconds)
+               let endA = tickEndA.seconds;
+               let startB = tickStartB.seconds;
+   
+               // Fallback for Ticks
+               if (typeof endA === 'undefined') endA = tickEndA.value ? tickEndA.value / 254016000000 : 0;
+               if (typeof startB === 'undefined') startB = tickStartB.value ? tickStartB.value / 254016000000 : 0;
+   
+               const gap = Math.abs(endA - startB);
+               
+               console.log(`[DEBUG] Pair ${i+1}: [${clipA.name}] -> [${clipB.name}] GAP=${Number(gap).toFixed(4)}s`);
+   
+               if (gap < 0.5) { 
+                   detectedCuts.push({
+                    index: cutIndex, // 0, 1, 2...
+                    clipB: clipB // We apply transitions to the start of the incoming clip
+                });
+
+                console.log(`[DEBUG] >>> VALID CUT FOUND (Cut Index: ${cutIndex})`);
+   
+                   // TIME CALCULATION
+                   // Frame A: End of Clip A - 1 frame
+                   const oneFrame = 1 / sequence.videoFrameRate;
+                   let timeA_Seconds = endA - oneFrame;
+                   
+                   // SANITY CHECK: Ensure time is valid
+                   if (timeA_Seconds < 0) {
+                       console.warn(`[DEBUG] Correcting negative timeA: ${timeA_Seconds} -> ${endA}`);
+                       timeA_Seconds = endA; // Just use the end point if calc fails
+                   }
+   
+                   const timeB_Seconds = startB;
+   
+                   // --- PROPER TIME OBJECT CREATION ---
+                   let exportTimeA, exportTimeB;
+   
+                   try {
+                       if (TickTime.createWithSeconds) {
+                           exportTimeA = await TickTime.createWithSeconds(timeA_Seconds);
+                           exportTimeB = await TickTime.createWithSeconds(timeB_Seconds);
+                       } else {
+                           // Fallback: Fetch FRESH Zero Points
+                           const zeroA = await sequence.getZeroPoint();
+                           exportTimeA = zeroA; 
+                           exportTimeA.seconds = timeA_Seconds;
+                           
+                           const zeroB = await sequence.getZeroPoint();
+                           exportTimeB = zeroB;
+                           exportTimeB.seconds = timeB_Seconds;
+                       }
+                   } catch(err) {
+                       console.error("[DEBUG] Time creation failed:", err);
+                       continue; 
+                   }
+   
+                   console.log(`[DEBUG] Exporting Cut${cutIndex}A at: ${exportTimeA.seconds}s`);
+                   console.log(`[DEBUG] Exporting Cut${cutIndex}B at: ${exportTimeB.seconds}s`);
+   
+                   // EXPORT
+                   await uxpExportFrame(sequence, exportTimeA, `Cut${cutIndex}_FrameA`);
+                   await uxpExportFrame(sequence, exportTimeB, `Cut${cutIndex}_FrameB`);
+               
+                   cutIndex++;
                 }
             }
-    
-            console.log("[DEBUG] --- Analysis Complete ---");
-    
-        } catch (err) {
-            console.error("[DEBUG] CRITICAL ERROR:", err);
-        }
-    }
-        
 
+            // 4. DECODER PART (Apply AI Suggestions)
+            console.log("[DEBUG] --- Starting Decoder (Transition Application) ---");
+        
+            // In real app: const aiData = await callPythonBackend(...);
+            const aiResponse = MOCK_AI_RESPONSE;
+
+            // Validate structure based on your partner's format
+            if (aiResponse && aiResponse.command && aiResponse.command.payload && aiResponse.command.payload.transitions) {
+                const transitionsList = aiResponse.command.payload.transitions;
+                
+                for (let instruction of transitionsList) {
+                    const duration = instruction.duration || 1.0;
+                    const targetCut = detectedCuts.find(c => c.index === instruction.cut_index);
+                    
+                    if (targetCut) {
+                        console.log(`[DEBUG] Applying '${instruction.transition_name}' to Cut Index ${instruction.cut_index} (Duration: ${duration}s)`);
+                        await applyTransition(targetCut.clipB, instruction.transition_name, duration);
+                    } else {
+                        console.warn(`[DEBUG] AI asked for Cut Index ${instruction.cut_index}, but we didn't find it locally.`);
+                    }
+                }
+            } else {
+                console.warn("[DEBUG] Invalid AI Response structure.");
+            }
+
+            console.log("[DEBUG] --- Analysis Complete ---");
+   
+       } catch (err) {
+           console.error("[DEBUG] CRITICAL ERROR:", err);
+       }
+   }
+    
     // ========================================================================
     // FEATURE 3: AUDIO SYNC 
     // ========================================================================
@@ -566,3 +644,38 @@ document.addEventListener("DOMContentLoaded", () => {
         console.log(`[DEBUG] Saving to Temp: ${nativePath}`);
         await Exporter.exportSequenceFrame(sequence, tickTimeObj, filename, parentDir, width, height);
     }
+
+    async function applyTransition(clipObject, matchName, durationInSeconds = 1.0) {
+    try {
+        const transitionObj = await TransitionFactory.createVideoTransition(matchName);
+        const options = new AddTransitionOptions();
+        options.setApplyToStart(true); 
+        options.setForceSingleSided(false);
+
+        // FIX: Set Custom Duration
+        try {
+            if (TickTime.createWithSeconds) {
+                const durationTime = await TickTime.createWithSeconds(durationInSeconds);
+                options.setDuration(durationTime);
+                console.log(`[DEBUG] Set transition duration to: ${durationInSeconds}s`);
+            }
+        } catch (err) {
+            console.warn(`[DEBUG] Could not set duration (using default): ${err.message}`);
+        }
+
+        // Create Action
+        const action = await clipObject.createAddVideoTransitionAction(transitionObj, options);
+        
+        // FIX: Execute via Project Transaction (Like your reference image)
+        const project = await app.Project.getActiveProject();
+
+        // We use executeTransaction to safely perform the action
+        await project.executeTransaction((compoundAction) => {
+            compoundAction.addAction(action);
+        });
+        
+        console.log(`[DEBUG] Transition applied.`);
+    } catch (e) {
+        console.error(`[DEBUG] Failed to apply transition: ${e.message}`);
+    }
+}
