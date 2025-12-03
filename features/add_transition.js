@@ -5,7 +5,7 @@ const fs = storage.localFileSystem;
 
 // Mock AI Data (Simulating your partner's JSON structure)
 const MOCK_AI_RESPONSE = {
-    "session_id": "1234567890",
+    "session_id": "16213822",
     "response_text": "All set. I added transitions...",
     "command": {
         "action": "add_transition",
@@ -61,12 +61,14 @@ async function handleTransitionRecommendation() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 message: "Recommend transitions",
-                frame_paths: framePaths
+                session_id: "16213822",
+                image_transition_path: framePaths
             })
         });
         
         const aiResponse = await response.json();
     
+        console.log("[DEBUG] AI Response:", JSON.stringify(aiResponse, null, 2));
 
         // Simulating network delay
         await new Promise(r => setTimeout(r, 500));
@@ -186,24 +188,31 @@ async function transitionDecoder(aiResponse, clips) {
     console.log("[DEBUG] --- Starting Decoder ---");
 
     // Validate structure based on your partner's format
-    if (aiResponse && aiResponse.command && aiResponse.command.payload && aiResponse.command.payload.transitions) {
-        const transitionsList = aiResponse.command.payload.transitions;
+    if (aiResponse && aiResponse.commands) {
+        
+        const commandList = aiResponse.commands;
 
-        for (let instruction of transitionsList) {
-            const duration = instruction.duration || 1.0;
-            // The cut_index refers to the gap between clips.
-            // cut_index 0 = Gap between Clip 0 and Clip 1.
-            // We apply the transition to the start of the INCOMING clip (Clip 1).
-            // So target clip index = cut_index + 1.
+        for (let command of commandList) {
+            if (command.payload.action_type === "add_transition") {
+                for (let transition of command.payload.transitions) {
+                    const duration = transition.duration || 1.0;
+                    const transitionName = transition.transition_name;
+                    const cutIndex = transition.cut_index;
 
-            const targetClipIndex = instruction.cut_index + 1;
+                    const targetClipIndex = cutIndex + 1;
 
-            if (targetClipIndex < clips.length) {
-                const targetClip = clips[targetClipIndex];
-                console.log(`[DEBUG] Applying '${instruction.transition_name}' to Clip Index ${targetClipIndex} (Duration: ${duration}s)`);
-                await applyTransition(targetClip, instruction.transition_name, duration);
-            } else {
-                console.warn(`[DEBUG] AI asked for Cut Index ${instruction.cut_index} (Target Clip ${targetClipIndex}), but it's out of bounds.`);
+                    if (targetClipIndex < clips.length) {
+                        const targetClip = clips[targetClipIndex];
+                        console.log(`[DEBUG] Applying '${transitionName}' to Clip Index ${targetClipIndex} (Duration: ${duration}s)`);
+                        await applyTransition(targetClip, transitionName, duration);
+                    } else {
+                        console.warn(`[DEBUG] AI asked for Cut Index ${cutIndex} (Target Clip ${targetClipIndex}), but it's out of bounds.`);
+                    }
+                }
+            } else if (command.payload.action_type === "trim_silence") {
+                let ranges = [];
+                ranges = command.payload.segments;
+                // TODO: Implement trim silence
             }
         }
     } else {
