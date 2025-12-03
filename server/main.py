@@ -92,9 +92,7 @@ class ChatResponse(BaseModel):
     commands: Optional[List[ToolCommand]] = None
 
 class IntentResponse(BaseModel):
-    trim_silence: bool = False
-    add_transition: bool = False
-    sync_lips: bool = False
+    required_tools: List[str]
     immediate_reply: Optional[str] = None
     
 # --- SYSTEM PROMPT ---
@@ -208,16 +206,14 @@ async def get_intent_endpoint(request: IntentRequest):
     intent = get_intent(user_msg_content, config)
 
     return IntentResponse(
-        trim_silence=intent["tools"].count("trim_silence") > 0,
-        add_transition=intent["tools"].count("add_transition") > 0,
-        sync_lips=intent["tools"].count("sync_lips") > 0,
-        immediate_reply=intent["reply"] if intent["reply"] else None
+        required_tools=intent["tools"],
+        immediate_reply=intent["reply"] if intent["reply"] else None        # Immediate reply if no tools are required
     )
 
 
 @traceable
-@app.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ToolsRequest):
+@app.post("/process_request", response_model=ChatResponse)
+async def process_request_endpoint(request: ToolsRequest):
     if not OPENROUTER_API_KEY:
         raise HTTPException(status_code=500, detail="Missing API Key configuration.")
 
