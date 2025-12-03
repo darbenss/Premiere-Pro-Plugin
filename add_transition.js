@@ -55,7 +55,7 @@ async function handleTransitionRecommendation() {
 
         // 2. FETCH: Send to AI (Mocked for now)
         // In a real scenario, you would do:
-        /*
+        
         const response = await fetch("http://localhost:8000/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -64,12 +64,15 @@ async function handleTransitionRecommendation() {
                 frame_paths: framePaths
             })
         });
+        
         const aiResponse = await response.json();
-        */
+    
 
         // Simulating network delay
         await new Promise(r => setTimeout(r, 500));
-        const aiResponse = MOCK_AI_RESPONSE;
+
+        // Mock AI Response
+        // const aiResponse = MOCK_AI_RESPONSE;
 
         // 3. DECODER: Apply Transitions
         await transitionDecoder(aiResponse, clips);
