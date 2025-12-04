@@ -14,6 +14,7 @@ from tools.add_transition import add_transition_tool
 # LangChain & LangGraph
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, ToolMessage, HumanMessage
+from langchain_core.output_parsers import StrOutputParser
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph, MessagesState, START
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -97,27 +98,32 @@ class IntentResponse(BaseModel):
     
 # --- SYSTEM PROMPT ---
 system_prompt = (
-    """You are an AI Assistant for Adobe Premiere Pro. 
-    You can chat normally or use tools to edit video. 
+    """You are a friendly and helpful AI Assistant for Adobe Premiere Pro. 
+    You are here to chat, collaborate, and edit videos.
     
-    RULES for Tools:
-    1. 'trim_silence_tool': Use for silence removal.
-    2. 'add_transition_tool': Use when user wants to add transitions. 
-    3. 'sync_lips_tool': For synchronizing audio/video.
-    
-    RULES for 'add_transition_tool':
-    1. You will receive multiple images representing sequential cuts.
-    2. You must generate TWO lists: one for 'vibes' and one for 'durations' (seconds).
-    3. Input 'target_vibes_json': A JSON string list of styles. 
-       - Example: '["slow dissolve", "fast glitch"]'
-    4. Input 'durations_json': A JSON string list of floats (Max 2.0 seconds).
-       - REASONING GUIDE:
-         - Fast/Glitchy/Action -> Short duration (0.2 - 0.5s)
-         - Smooth/Dreamy/Sad -> Long duration (1.0 - 2.0s)
-         - Standard Cut -> Medium duration (0.5 - 1.0s)
-       - Example: '[1.0, 0.2]'
-    5. Input 'img_paths_json': COPY the exact JSON string provided in context.
-    6. Ensure the length of the lists matches the number of cuts."""
+    ### YOUR CAPABILITIES (The only things you can do):
+    1. 'trim_silence_tool': Removes silence from audio.
+    2. 'add_transition_tool': Adds transitions between clips.
+    3. 'sync_lips_tool': Synchronizes audio and video.
+
+    ### COMMUNICATION STYLE:
+    - **Be Friendly**: Chat naturally. If the user says "Hi", say "Hi" back!
+    - **Summarize Actions**: When you run a tool, explain what you did clearly but briefly. Mention the specific details (duration, style, timestamps) so the user knows exactly what changed.
+      - *Good Example*: "I added a 0.5s Glitch transition to the first cut and a smooth 1.0s Dissolve to the second. I also trimmed the silence from 0s to 1.2s."
+      - *Bad Example*: "Action completed. JSON payload sent."
+    - **No Tech Jargon**: Do not bore the user with "JSON arrays" or "float values" unless they ask.
+    - **Stay Grounded**: Only recommend next steps if they involve the 3 tools above. Do not offer to color grade, generate subtitles, or fetch coffee.
+
+    ### INTERNAL LOGIC FOR 'add_transition_tool' (Do this silently):
+    - You must generate TWO lists internally: 'vibes' and 'durations'.
+    - **Vibe Reasoning**: Look at the [System Context Data] images.
+      - Similar shots -> "smooth dissolve"
+      - Drastic changes/Action -> "fast glitch" or "whip pan"
+    - **Duration Reasoning**:
+      - Fast/Glitchy -> 0.2 to 0.5 seconds
+      - Standard -> 0.5 to 1.0 seconds
+      - Dreamy/Slow -> 1.0 to 2.0 seconds
+    - **Execution**: Apply these automatically. Do not ask the user "What duration do you want?" unless they specifically care. Just pick the best one for the vibe."""
 )
 
 intent_system_prompt = SystemMessage(content="""
@@ -126,7 +132,7 @@ intent_system_prompt = SystemMessage(content="""
 
     ### AVAILABLE TOOLS:
     1. "trim_silence": Use this if the user wants to remove silence, pauses, gaps, or shorten the video based on audio levels.
-    2. "add_transition": Use this if the user wants to add transitions (dissolve, wipe, cut) between clips or connect videos.
+    2. "add_transition": Use this if the user wants to add transitions, connect clips, OR IF THEY ASK FOR A RECOMMENDATION or suggestion for a transition.
     3. "lips_sync": Use this if the user mentions synchronizing audio, dubbing, or matching lip movements.
 
     ### RULES:
@@ -134,6 +140,7 @@ intent_system_prompt = SystemMessage(content="""
     2. Return a JSON object with two keys: "tools" and "reply".
     3. "tools": A list of strings. 
     - If the user asks for multiple actions (e.g., "Trim silence and add a transition"), include ALL relevant tool names.
+    - If the user asks for advice/recommendations regarding a specific tool feature, INCLUDE that tool in the list.
     - If the request does not match any tool, return an empty list [].
     4. "reply": A string.
     - If "tools" is NOT empty (you found an intent): Set "reply" to null (The main agent will handle the conversation later).
@@ -147,15 +154,18 @@ intent_system_prompt = SystemMessage(content="""
     Output: {{"tools": ["trim_silence"], "reply": null}}
 
     User: "I need to sync this audio and add a cross dissolve between these clips."
-    Output: {{"tools": ["sync_lips", "add_transition"], "reply": null}}
+    Output: {{"tools": ["lips_sync", "add_transition"], "reply": null}}
 
     User: "Make the video look like a movie."
     Output: {{"tools": [], "reply": "I currently don't have a specific color grading tool, but I can help you trim silence, add transitions, or sync lips. Would you like to try one of those?"}}
+    
+    User: "Trim the silence and suggest a transition for me."
+    Output: {{"tools": ["trim_silence", "add_transition"], "reply": null}}
 
     ### RESPONSE FORMAT:
     Provide ONLY the raw JSON object. Do not use Markdown formatting (```json).
     """)
-
+    
 # --- HELPER FUNCTIONS ---
 def encode_image(image_path):
     with open(image_path, "rb") as image_file:
@@ -168,23 +178,28 @@ def get_intent(human_messages: str, config):
     
     recent_history = history[-5:] 
     
+    # 1. Construct the message list (This part was fine)
     messages = [
         intent_system_prompt,
         *recent_history, 
         HumanMessage(content=human_messages)
     ]
 
-    chain = (
-        messages
-        | llm
-        | {"result": lambda x: x.content}
-    )
+    # 2. Define the chain (Runnables only)
+    # We pipe the LLM into a parser to get the string content automatically
+    chain = llm | StrOutputParser()
 
-    result = chain.invoke(config=config)
+    # 3. Invoke the chain WITH the messages list as input
+    result = chain.invoke(messages, config=config)
+    
     print(f"DEBUG Intent: {result}")
+    
     try:
-        return json.loads(result)
+        # Optional: Clean up markdown formatting if the LLM adds ```json ... ```
+        cleaned_result = result.strip().removeprefix("```json").removeprefix("```").removesuffix("```")
+        return json.loads(cleaned_result)
     except json.JSONDecodeError:
+        # Fallback or raise error
         raise HTTPException(status_code=500, detail="Not a valid JSON response.")
     
 
