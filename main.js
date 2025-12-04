@@ -53,9 +53,7 @@ document.addEventListener("DOMContentLoaded", () => {
         chip.addEventListener('click', async (event) => {
             // This gets "Trim Silence", "Audio Sync", etc.
             const action = event.currentTarget.getAttribute('label');
-
             // --- ROUTER LOGIC ---
-
             if (action === "Trim Silence") {
                 showUnderConstructionWithDelay();
             }
@@ -119,6 +117,15 @@ document.addEventListener("DOMContentLoaded", () => {
             if (intentData.session_id) {
                 currentSessionId = intentData.session_id;
                 console.log("Session ID Updated (Intent):", currentSessionId);
+            }
+
+            // GATEKEEPER: BLOCK INTENTS
+            const BLOCKED_INTENTS = ["trim_silence", "lips_sync"]; 
+            if (intentData.required_tools && intentData.required_tools.some(tool => BLOCKED_INTENTS.includes(tool))) {
+                console.log(`🚫 Intent '${intentData.required_tools}' is currently disabled.`);
+                removeBubble(loadingId); 
+                showUnderConstructionWithDelay(); 
+                return; 
             }
 
             // Logic: If immediate_reply is not null and required_tools is empty, just display message
