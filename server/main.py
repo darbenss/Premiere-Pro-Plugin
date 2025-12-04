@@ -1,4 +1,5 @@
 import os
+import time
 import json
 import base64
 import sqlite3
@@ -108,6 +109,7 @@ system_prompt = (
     3. 'sync_lips': Synchronizes audio and video.
 
     ### COMMUNICATION STYLE:
+    - *Length Constraint: All replies must be concise and contain a **maximum of 150 words*.
     - **Be Friendly**: Chat naturally. If the user says "Hi", say "Hi" back!
     - **Summarize Actions**: When you run a tool, explain what you did clearly but briefly. Mention the specific details (duration, style, timestamps) so the user knows exactly what changed.
       - *Good Example*: "I added a 0.5s Glitch transition to the first cut and a smooth 1.0s Dissolve to the second. I also trimmed the silence from 0s to 1.2s."
@@ -115,16 +117,20 @@ system_prompt = (
     - **No Tech Jargon**: Do not bore the user with "JSON arrays" or "float values" unless they ask.
     - **Stay Grounded**: Only recommend next steps if they involve the 3 tools above. Do not offer to color grade, generate subtitles, or fetch coffee.
 
-    ### INTERNAL LOGIC FOR 'add_transition_tool' (Do this silently):
-    - You must generate TWO lists internally: 'vibes' and 'durations'.
-    - **Vibe Reasoning**: Look at the [System Context Data] images.
-      - Similar shots -> "smooth dissolve"
-      - Drastic changes/Action -> "fast glitch" or "whip pan"
-    - **Duration Reasoning**:
-      - Fast/Glitchy -> 0.2 to 0.5 seconds
-      - Standard -> 0.5 to 1.0 seconds
-      - Dreamy/Slow -> 1.0 to 2.0 seconds
-    - **Execution**: Apply these automatically. Do not ask the user "What duration do you want?" unless they specifically care. Just pick the best one for the vibe."""
+    RULES for 'add_transition_tool':
+    1. You will receive multiple images representing sequential cuts.
+    2. You must generate TWO lists: one for 'vibes' and one for 'durations' (seconds).
+    3. Input 'target_vibes_json': A JSON string list of styles. 
+       - Example: '["slow dissolve", "fast glitch"]'
+    4. Input 'durations_json': A JSON string list of floats (Max 2.0 seconds).
+       - REASONING GUIDE:
+         - Fast/Glitchy/Action -> Short duration (0.2 - 0.5s)
+         - Smooth/Dreamy/Sad -> Long duration (1.0 - 2.0s)
+         - Standard Cut -> Medium duration (0.5 - 1.0s)
+       - Example: '[1.0, 0.2]'
+    5. Input 'img_paths_json': COPY the exact JSON string provided in context.
+    6. Ensure the length of the lists matches the number of cuts
+    7. **Execution**: Apply these automatically. Do not ask the user "What duration do you want?" unless they specifically care. Just pick the best one for the vibe."""
 )
 
 intent_system_prompt = SystemMessage(content="""
@@ -172,17 +178,10 @@ def encode_image(image_path):
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode('utf-8')
 
-def get_intent(human_messages: str, config):
-    # READ ONLY: Fetch history from the Graph's memory
-    current_state = graph.get_state(config)
-    history = current_state.values.get("messages", [])
-    
-    recent_history = history[-5:] 
-    
+def get_intent(human_messages: str):
     # 1. Construct the message list (This part was fine)
     messages = [
         intent_system_prompt,
-        *recent_history, 
         HumanMessage(content=human_messages)
     ]
 
@@ -191,14 +190,14 @@ def get_intent(human_messages: str, config):
     chain = llm | StrOutputParser()
 
     # 3. Invoke the chain WITH the messages list as input
-    result = chain.invoke(messages, config=config)
+    result = chain.invoke(messages)
     
     # 2. Define the chain (Runnables only)
     # We pipe the LLM into a parser to get the string content automatically
     chain = llm | StrOutputParser()
 
     # 3. Invoke the chain WITH the messages list as input
-    result = chain.invoke(messages, config=config)
+    result = chain.invoke(messages)
     
     print(f"DEBUG Intent: {result}")
     
@@ -225,9 +224,7 @@ async def get_intent_endpoint(request: IntentRequest):
     if not user_msg_content:
         raise HTTPException(status_code=400, detail="No message provided.")
 
-    config = {"configurable": {"thread_id": request.session_id}}
-
-    intent = get_intent(user_msg_content, config)
+    intent = get_intent(user_msg_content)
 
     return IntentResponse(
         required_tools=intent["tools"],
@@ -298,35 +295,49 @@ async def process_request_endpoint(request: ToolsRequest):
                     current_clip = clips[i]
                     next_clip = clips[i+1]
 
-                    # SAFETY CHECK: Ensure clips aren't empty lists
                     if not current_clip or not next_clip:
                         print(f"Skipping empty clip data at index {i}")
                         continue
 
-                    outgoing_clip_tail = current_clip[-1] # Always gets the last frame
-                    incoming_clip_head = next_clip[0]     # Always gets the first frame
+                    outgoing_clip_tail = current_clip[-1]
+                    incoming_clip_head = next_clip[0]
                     
-                    # We load BOTH images for this specific cut
+                    # Iterate through both paths
                     for img_path in [outgoing_clip_tail, incoming_clip_head]:
-                        base64_image = encode_image(img_path)
+                        # 1. Sanitize path (handle mixed slashes if necessary)
+                        clean_path = os.path.normpath(img_path) + ".png"
+
+                        # 2. Check if file exists explicitly
+                        if not os.path.exists(clean_path):
+                            print(f"⚠️ MISSING FILE: {clean_path}")
+                            # Optional: Add a small retry if it's a race condition
+                            while not os.path.exists(clean_path):
+                                time.sleep(1) 
+                            
+                            if not os.path.exists(clean_path):
+                                continue 
                         
-                        message_content.append({
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}",
-                                "detail": "low" # 'low' is cheaper/faster, 'high' for better analysis
-                            }
-                        })
-                
+                        # 3. Proceed to encode
+                        try:
+                            base64_image = encode_image(clean_path)
+                            message_content.append({
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{base64_image}",
+                                    "detail": "low"
+                                }
+                            })
+                        except Exception as encode_err:
+                            print(f"Error encoding {clean_path}: {encode_err}")
+
                 message_content.append({
                     "type": "text", 
-                    "text": f"[System Note]: The images above represent {len(clips)-1} cut points. They are ordered sequentially: Cut 1 Out, Cut 1 In, Cut 2 Out, Cut 2 In..."
+                    "text": f"[System Note]: The images above represent {len(clips)-1} cut points..."
                 })
 
             except Exception as e:
-                print(f"Error loading images: {e}")
-                # Don't crash, just proceed with text only
-    
+                print(f"Critical Loop Error: {e}")
+        
     input_messages.append(HumanMessage(content=message_content))
 
     # 4. Run Graph

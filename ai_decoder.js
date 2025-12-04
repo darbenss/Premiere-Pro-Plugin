@@ -13,6 +13,7 @@
 const { processTrimSilence } = require('./features/trim_silence.js');
 const { processTransitions } = require('./features/add_transition.js');
 
+
 /**
  * Executes the commands returned by the AI.
  * @param {Array} commands - The list of commands to execute.

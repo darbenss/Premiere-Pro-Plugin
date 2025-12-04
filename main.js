@@ -15,6 +15,10 @@
 const { executeAICommands } = require('./ai_decoder.js');
 const { gatherAudioContext } = require('./features/trim_silence.js');
 const { gatherClipContext } = require('./features/add_transition.js');
+const { generateSimpleUniqueId } = require('./uniquesession_id.js'); // Import Session Generator
+
+// GLOBAL STATE
+let currentSessionId = null;
 
 // TOOL REGISTRY
 const TOOL_REGISTRY = {
@@ -36,13 +40,31 @@ document.addEventListener("DOMContentLoaded", () => {
     const chatHistory = document.getElementById('chatHistory');
     const emptyState = document.getElementById('emptyStateContainer');
 
+    // --- INITIALIZATION ---
+    (async () => {
+        currentSessionId = await generateSimpleUniqueId();
+        console.log("Session ID Initialized:", currentSessionId);
+    })();
+
     // --- EVENT LISTENERS ---
 
     // 1. CHIP BUTTONS (Quick Actions)
     chips.forEach(chip => {
         chip.addEventListener('click', async (event) => {
+            // This gets "Trim Silence", "Audio Sync", etc.
             const action = event.currentTarget.getAttribute('label');
-            await processUserMessage(action);
+
+            // --- ROUTER LOGIC ---
+
+            if (action === "Trim Silence") {
+                showUnderConstructionWithDelay();
+            }
+            else if (action === "Audio Sync") {
+                showUnderConstructionWithDelay();
+            }
+            else if (action === "Transition Recommendation") {
+                await processUserMessage(action);
+            }
         });
     });
 
@@ -69,14 +91,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     async function processUserMessage(messageText) {
         // 1. Switch UI from Empty State to Chat Mode
-        if (emptyState.style.display !== 'none') {
-            emptyState.style.display = 'none';
-            chatHistory.style.display = 'flex';
-
-            // Adjust mainDisplay layout for chat
-            mainDisplay.style.justifyContent = 'flex-start';
-            mainDisplay.style.alignItems = 'stretch';
-        }
+        ensureChatMode();
 
         // 2. Add User Message Bubble
         addBubble(messageText, 'user');
@@ -90,13 +105,21 @@ document.addEventListener("DOMContentLoaded", () => {
             const intentResponse = await fetch("http://localhost:8000/get_intent", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ session_id: "14728123", 
-                                    message: messageText })
+                body: JSON.stringify({
+                    session_id: currentSessionId,
+                    message: messageText
+                })
             });
 
             if (!intentResponse.ok) throw new Error(`Intent Detection Failed: ${intentResponse.statusText}`);
             const intentData = await intentResponse.json();
             console.log("Intent Data:", intentData);
+
+            // Update Session ID if returned
+            if (intentData.session_id) {
+                currentSessionId = intentData.session_id;
+                console.log("Session ID Updated (Intent):", currentSessionId);
+            }
 
             // Logic: If immediate_reply is not null and required_tools is empty, just display message
             if (intentData.immediate_reply && (!intentData.required_tools || intentData.required_tools.length === 0)) {
@@ -131,7 +154,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             let body = {
-                session_id: "14728123",
+                session_id: currentSessionId,
                 message: messageText,
             };
 
@@ -139,10 +162,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 body.audio_file_path = contextData["trim_silence"];
             }
             if (contextData["add_transition"]) {
+                console.log("path: ", contextData["add_transition"]);
                 body.image_transition_path = contextData["add_transition"];
             }
             // TODO: If want to add more context data, add it here
 
+            console.log("Body:", body);
             // --- STEP 3: PROCESS REQUEST ---
             console.log("--- Step 3: Process Request ---");
             const processResponse = await fetch("http://localhost:8000/process_request", {
@@ -154,6 +179,12 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!processResponse.ok) throw new Error(`Process Request Failed: ${processResponse.statusText}`);
             const result = await processResponse.json();
             console.log("Process Result:", result);
+
+            // Update Session ID if returned
+            if (result.session_id) {
+                currentSessionId = result.session_id;
+                console.log("Session ID Updated (Process):", currentSessionId);
+            }
 
             removeBubble(loadingId);
 
@@ -217,6 +248,26 @@ document.addEventListener("DOMContentLoaded", () => {
     function removeBubble(id) {
         const el = document.getElementById(id);
         if (el) el.remove();
+    }
+
+    function showUnderConstructionWithDelay() {
+        ensureChatMode()
+        const loadingId = addTypingIndicator();
+        setTimeout(() => {
+            removeBubble(loadingId);
+            addBubble("🚧 Feature under construction.", 'ai');
+        }, 1000);
+    }
+
+    function ensureChatMode() {
+        if (emptyState.style.display !== 'none') {
+            emptyState.style.display = 'none';
+            chatHistory.style.display = 'flex';
+
+            // Adjust mainDisplay layout for chat
+            mainDisplay.style.justifyContent = 'flex-start';
+            mainDisplay.style.alignItems = 'stretch';
+        }
     }
 
 }); // --- END OF DOMContentLoaded ---

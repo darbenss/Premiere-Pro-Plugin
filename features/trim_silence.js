@@ -9,6 +9,8 @@ let wizardState = {
     currentIndex: 0
 };
 
+
+
 // ========================================================================
 //  FEATURE 1: TRIM SILENCE (Logic & Wizard)
 // ========================================================================
@@ -34,6 +36,20 @@ async function gatherAudioContext() {
 async function processTrimSilence(payload, aiMessage, display) {
     console.log("Processing Trim Silence Payload:", payload);
 
+    if (display) {
+        const chatHistory = display.querySelector('#chatHistory');
+        if (chatHistory) {
+            const lastAiRow = chatHistory.querySelector('.message-row.ai:last-child');
+            if (lastAiRow) {
+                const bubble = lastAiRow.querySelector('.chat-bubble');
+                if (bubble) {
+                    bubble.innerText = aiMessage;
+                }
+            }
+        }
+    }
+    // --- HARDCODED TEST DATA INJECTION (END) ---
+
     let ranges = [];
 
     // Check for segments in payload
@@ -46,11 +62,18 @@ async function processTrimSilence(payload, aiMessage, display) {
     console.log("Parsed Ranges:", ranges);
 
     // Convert [start, end] arrays into objects { start, end }
-    // Constraint: The AI returns segments as nested arrays: [[0.0, 1.4], [2.1, 3.1]]
     const ranges_parsed = ranges.map(segment => ({
         start: segment[0],
         end: segment[1]
     }));
+
+    // // --- LOGIC CHANGE START ---
+    // // Update the global state with the PARSED objects so highlightCurrentRange() can read them.
+    // if (typeof wizardState !== 'undefined') {
+    //     wizardState.ranges = ranges_parsed; 
+    //     wizardState.currentIndex = 0; // Reset index to start
+    // }
+    // // --- LOGIC CHANGE END ---
 
     // Recommend to Cut the Video
     if (ranges_parsed && ranges_parsed.length > 0) {
@@ -64,35 +87,11 @@ async function processTrimSilence(payload, aiMessage, display) {
             console.error("Trim Failed Message: " + e.message);
         }
 
-        // SUCCESS UI
-        if (display) {
-            display.innerHTML = `
-                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--spectrum-global-color-gray-50); padding: 20px; text-align: center;">
-                        
-                    <div style="background-color: var(--spectrum-global-color-gray-200); color: var(--spectrum-global-color-gray-900); padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; max-width: 90%; font-size: 14px; line-height: 1.4; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
-                        "${aiMessage}"
-                    </div>
-            
-                    <svg style="width: 48px; height: 48px; fill: #2D9D78; margin-bottom: 16px;" viewBox="0 0 24 24">
-                        <path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/>
-                    </svg>
-                    <h2 style="margin: 0 0 8px 0;">Ready to Review</h2>
-                    <p style="margin: 0; color: var(--spectrum-global-color-gray-300);">Found ${ranges_parsed.length} silent segments.</p>
-                    <p style="font-size: 12px; margin-top: 8px; opacity: 0.7;">Use the controls below to review.</p>
-                </div>
-            `;
-        }
+        // CRITICAL: Do NOT overwrite display.innerHTML.
+        // The UI is handled by the chat bubble above.
+
     } else {
-        if (display) {
-            display.innerHTML = `
-                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--spectrum-global-color-gray-50); padding: 20px; text-align: center;">
-                    <div style="background-color: var(--spectrum-global-color-gray-200); color: var(--spectrum-global-color-gray-900); padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;">
-                        "${aiMessage}"
-                    </div>
-                    <p>No silent segments were found to cut.</p>
-                </div>
-            `;
-        }
+        console.log("No silent segments found.");
     }
 }
 
@@ -130,7 +129,7 @@ async function performTrimSilence(silentRanges) {
 }
 
 async function nextStep(wasActionTaken) {
-    wizardState.currentIndex++;
+    wizardState.currentIndex;
     if (wizardState.currentIndex >= wizardState.ranges.length) {
         finishWizard();
         return;
@@ -153,6 +152,7 @@ async function highlightCurrentRange() {
     const seq = await project.getActiveSequence();
 
     const startTick = TickTime.createWithSeconds(range.start);
+    console.log("Start Tick:", startTick);
     const endTick = TickTime.createWithSeconds(range.end);
 
     await project.lockedAccess(async () => {
@@ -163,6 +163,7 @@ async function highlightCurrentRange() {
                 compoundAction.addAction(seq.createSetOutPointAction(endTick));
         });
     });
+
     seq.setPlayerPosition(startTick);
 }
 

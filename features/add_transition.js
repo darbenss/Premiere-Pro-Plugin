@@ -33,7 +33,7 @@ async function gatherClipContext() {
         console.log("[DEBUG] Encoder Output (Frame Paths):", JSON.stringify(framePaths, null, 2));
 
         // Return data needed for AI
-        return { framePaths, clips };
+        return framePaths;
 
     } catch (err) {
         console.error("[DEBUG] CRITICAL ERROR in gatherClipContext:", err);
