@@ -180,7 +180,6 @@ def get_intent(human_messages: str, config):
     recent_history = history[-5:] 
     
     # 1. Construct the message list (This part was fine)
-    # 1. Construct the message list (This part was fine)
     messages = [
         intent_system_prompt,
         *recent_history, 
