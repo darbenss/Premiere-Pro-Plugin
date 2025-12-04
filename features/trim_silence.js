@@ -12,85 +12,61 @@ let wizardState = {
 // ========================================================================
 //  FEATURE 1: TRIM SILENCE (Logic & Wizard)
 // ========================================================================
-async function handleTrimSilence() {
-    const inputField = document.getElementById('aiInput');
-    const mainDisplay = document.getElementById('mainDisplay');
-    let currentMessage = inputField.value.trim();
 
-    // UI Loading
-    inputField.disabled = true;
-    mainDisplay.innerHTML = `
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--spectrum-global-color-gray-50);">
-            <sp-progress-bar label="Step 1: Exporting Audio..." indeterminate style="width: 200px; margin-bottom: 20px;"></sp-progress-bar>
-            <p style="font-size: 14px;">Preparing audio for AI analysis...</p>
-            <p style="font-size: 12px; color: var(--spectrum-global-color-gray-400);">Please wait, this can take a few seconds.</p>
-        </div>
-    `;
+/**
+ * Gathers audio context for analysis.
+ * Exports the sequence audio to a temporary WAV file.
+ * @returns {Promise<string>} The path to the exported audio file.
+ */
+async function gatherAudioContext() {
+    console.log("Starting Audio Export...");
+    const audioFilePath = await exportAudioForAnalysis();
+    console.log("Audio Exported to:", audioFilePath);
+    return audioFilePath;
+}
 
-    try {
-        // Export
-        console.log("Starting Audio Export...");
-        const audioFilePath = await exportAudioForAnalysis();
-        console.log("Audio Exported to:", audioFilePath);
+/**
+ * Processes the trim silence payload from AI.
+ * @param {Object} payload - The payload containing segments.
+ * @param {string} aiMessage - The message from AI.
+ * @param {HTMLElement} display - The main display element to update UI.
+ */
+async function processTrimSilence(payload, aiMessage, display) {
+    console.log("Processing Trim Silence Payload:", payload);
 
-        // Send to Python
-        mainDisplay.innerHTML = `
-            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--spectrum-global-color-gray-50);">
-                <sp-progress-bar label="Step 2: AI Analysis..." indeterminate style="width: 200px; margin-bottom: 20px;"></sp-progress-bar>
-                <p style="font-size: 14px;">Sending to Python VAD...</p>
-            </div>
-        `;
+    let ranges = [];
 
-        const response = await fetch("http://localhost:8000/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                session_id: "1234567890",
-                message: currentMessage,
-                audio_file_path: audioFilePath
-            })
-        });
+    // Check for segments in payload
+    if (payload && payload.segments) {
+        ranges = payload.segments;
+    } else {
+        console.warn("No segments found in payload.");
+    }
 
-        if (!response.ok) throw new Error(`Python Server Error: ${response.statusText}`);
-        const result = await response.json();
+    console.log("Parsed Ranges:", ranges);
 
-        // Parse Response
-        const aiMessage = result.response_text || "Analysis complete.";
-        let ranges = [];
+    // Convert [start, end] arrays into objects { start, end }
+    // Constraint: The AI returns segments as nested arrays: [[0.0, 1.4], [2.1, 3.1]]
+    const ranges_parsed = ranges.map(segment => ({
+        start: segment[0],
+        end: segment[1]
+    }));
 
-        // Check for the complex structure from python
-        if (result.command && result.command.payload && result.command.payload.segments) {
-            ranges = result.command.payload.segments;
-        }
-        // Check for simple structures (Backup/Testing)
-        else if (result.silent_timestamps) {
-            ranges = result.silent_timestamps;
-        }
-        else if (result.data) {
-            ranges = result.data;
+    // Recommend to Cut the Video
+    if (ranges_parsed && ranges_parsed.length > 0) {
+
+        // Perform the actual timeline edits
+        try {
+            await performTrimSilence(ranges_parsed);
+            console.log("Trim Success!");
+        } catch (e) {
+            console.error("Trim Failed:", e);
+            console.error("Trim Failed Message: " + e.message);
         }
 
-        console.log("Parsed Ranges:", ranges);
-
-        // Convert [start, end] arrays into objects { start, end }
-        const ranges_parsed = ranges.map(segment => ({
-            start: segment[0],
-            end: segment[1]
-        }));
-
-        // Recommend to Cut the Video
-        if (ranges_parsed && ranges_parsed.length > 0) {
-
-            // Perform the actual timeline edits
-            try {
-                await performTrimSilence(ranges_parsed);
-                console.log("Trim Success!");
-            } catch (e) {
-                console.error("Trim Failed:", e);
-                console.error("Trim Failed Message: " + e.message);
-            }
-            // SUCCESS UI
-            mainDisplay.innerHTML = `
+        // SUCCESS UI
+        if (display) {
+            display.innerHTML = `
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--spectrum-global-color-gray-50); padding: 20px; text-align: center;">
                         
                     <div style="background-color: var(--spectrum-global-color-gray-200); color: var(--spectrum-global-color-gray-900); padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; max-width: 90%; font-size: 14px; line-height: 1.4; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
@@ -105,8 +81,10 @@ async function handleTrimSilence() {
                     <p style="font-size: 12px; margin-top: 8px; opacity: 0.7;">Use the controls below to review.</p>
                 </div>
             `;
-        } else {
-            mainDisplay.innerHTML = `
+        }
+    } else {
+        if (display) {
+            display.innerHTML = `
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--spectrum-global-color-gray-50); padding: 20px; text-align: center;">
                     <div style="background-color: var(--spectrum-global-color-gray-200); color: var(--spectrum-global-color-gray-900); padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;">
                         "${aiMessage}"
@@ -115,19 +93,6 @@ async function handleTrimSilence() {
                 </div>
             `;
         }
-
-    } catch (error) {
-        console.error(error);
-        // ERROR UI
-        mainDisplay.innerHTML = `
-            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--spectrum-global-color-gray-50);">
-                <h3 style="color: #D7373F; margin-bottom: 8px;">Error</h3>
-                <p style="text-align: center; margin-bottom: 16px;">${error.message}</p>
-                <p style="font-size: 11px; color: var(--spectrum-global-color-gray-400);">Ensure Python server is running at localhost:8000</p>
-            </div>
-        `;
-    } finally {
-        inputField.disabled = false;
     }
 }
 
@@ -262,5 +227,6 @@ async function exportAudioForAnalysis() {
 }
 
 module.exports = {
-    handleTrimSilence
+    gatherAudioContext,
+    processTrimSilence
 };

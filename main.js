@@ -1,8 +1,26 @@
+/**
+ * ============================================================================
+ * HOW TO ADD A NEW FEATURE
+ * ============================================================================
+ * 1. Create a new feature file in `features/` (e.g., `features/my_feature.js`).
+ * 2. Export two functions: `gatherMyContext()` and `processMyFeature(payload)`.
+ * 3. Add the `gather` function to `TOOL_REGISTRY` below.
+ * 4. Add the `process` function to `ai_decoder.js` switch statement.
+ * ============================================================================
+ */
+
 // ============================================================================
 //  GLOBAL IMPORTS & CONSTANTS
 // ============================================================================
-const { handleTrimSilence } = require('./features/trim_silence.js');
-const { handleTransitionRecommendation } = require('./features/add_transition.js');
+const { executeAICommands } = require('./ai_decoder.js');
+const { gatherAudioContext } = require('./features/trim_silence.js');
+const { gatherClipContext } = require('./features/add_transition.js');
+
+// TOOL REGISTRY
+const TOOL_REGISTRY = {
+    "trim_silence": gatherAudioContext,
+    "add_transition": gatherClipContext
+};
 
 // ============================================================================
 //  MAIN ENTRY POINT | INITIALIZATION 
@@ -19,7 +37,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const emptyState = document.getElementById('emptyStateContainer');
 
     // --- EVENT LISTENERS ---
-    
+
     // 1. CHIP BUTTONS (Quick Actions)
     chips.forEach(chip => {
         chip.addEventListener('click', async (event) => {
@@ -46,7 +64,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // ========================================================================
-    //  CORE CHAT LOGIC
+    //  CORE CHAT LOGIC (DOUBLE HANDSHAKE)
     // ========================================================================
 
     async function processUserMessage(messageText) {
@@ -54,7 +72,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (emptyState.style.display !== 'none') {
             emptyState.style.display = 'none';
             chatHistory.style.display = 'flex';
-            
+
             // Adjust mainDisplay layout for chat
             mainDisplay.style.justifyContent = 'flex-start';
             mainDisplay.style.alignItems = 'stretch';
@@ -66,36 +84,88 @@ document.addEventListener("DOMContentLoaded", () => {
         // 3. Add Typing Indicator
         const loadingId = addTypingIndicator();
 
-        // 4. Determine Intent & Route to Logic
-        // We assume the actual API fetching happens inside handleTrimSilence/handleTransitionRecommendation
         try {
-            const lowerMsg = messageText.toLowerCase();
+            // --- STEP 1: INTENT DETECTION ---
+            console.log("--- Step 1: Intent Detection ---");
+            const intentResponse = await fetch("http://localhost:8000/get_intent", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ session_id: "14728123", 
+                                    message: messageText })
+            });
 
-            if (lowerMsg.includes('silence') || lowerMsg.includes('trim')) {
-                // FEATURE 1: TRIM SILENCE
-                await handleTrimSilence(); 
+            if (!intentResponse.ok) throw new Error(`Intent Detection Failed: ${intentResponse.statusText}`);
+            const intentData = await intentResponse.json();
+            console.log("Intent Data:", intentData);
+
+            // Logic: If immediate_reply is not null and required_tools is empty, just display message
+            if (intentData.immediate_reply && (!intentData.required_tools || intentData.required_tools.length === 0)) {
                 removeBubble(loadingId);
-                addBubble("I've analyzed the audio. Use the controls below to review silences.", 'ai');
+                addBubble(intentData.immediate_reply, 'ai');
+                return;
+            }
 
-            } else if (lowerMsg.includes('transition') || lowerMsg.includes('fade') || lowerMsg.includes('dissolve')) {
-                // FEATURE 2: TRANSITIONS
-                await handleTransitionRecommendation();
-                removeBubble(loadingId);
-                addBubble("Transitions have been added to your cut points.", 'ai');
+            // --- STEP 2: DATA GATHERING ---
+            console.log("--- Step 2: Data Gathering ---");
+            const contextData = {};
 
-            } else if (lowerMsg.includes('sync') || lowerMsg.includes('audio')) {
-                // FEATURE 3: AUDIO SYNC
-                await handleAudioSync();
-                removeBubble(loadingId);
-                addBubble("Audio synchronization complete.", 'ai');
+            if (intentData.required_tools && intentData.required_tools.length > 0) {
+                // Update UI to show we are working
+                // Optional: addBubble("Analyzing project...", 'ai'); 
 
-            } else {
-                // FALLBACK AI RESPONSE
-                // Simulate a slight delay for realism if not using a heavy function
-                setTimeout(() => {
-                    removeBubble(loadingId);
-                    addBubble(`I received: "${messageText}". currently I am optimized for Silence Trimming, Transitions, and Audio Sync.`, 'ai');
-                }, 1000);
+                for (const toolName of intentData.required_tools) {
+                    const gatherFunc = TOOL_REGISTRY[toolName];
+                    if (gatherFunc) {
+                        console.log(`Gathering data for: ${toolName}`);
+                        try {
+                            const data = await gatherFunc();
+                            contextData[toolName] = data;
+                        } catch (err) {
+                            console.error(`Failed to gather data for ${toolName}:`, err);
+                            contextData[toolName] = { error: err.message };
+                        }
+                    } else {
+                        console.warn(`Tool not found in registry: ${toolName}`);
+                    }
+                }
+            }
+
+            let body = {
+                session_id: "14728123",
+                message: messageText,
+            };
+
+            if (contextData["trim_silence"]) {
+                body.audio_file_path = contextData["trim_silence"];
+            }
+            if (contextData["add_transition"]) {
+                body.image_transition_path = contextData["add_transition"];
+            }
+            // TODO: If want to add more context data, add it here
+
+            // --- STEP 3: PROCESS REQUEST ---
+            console.log("--- Step 3: Process Request ---");
+            const processResponse = await fetch("http://localhost:8000/process_request", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+
+            if (!processResponse.ok) throw new Error(`Process Request Failed: ${processResponse.statusText}`);
+            const result = await processResponse.json();
+            console.log("Process Result:", result);
+
+            removeBubble(loadingId);
+
+            // --- STEP 4: EXECUTION ---
+            console.log("--- Step 4: Execution ---");
+
+            if (result.response_text) {
+                addBubble(result.response_text, 'ai');
+            }
+
+            if (result.commands && result.commands.length > 0) {
+                await executeAICommands(result.commands, result.response_text);
             }
 
         } catch (error) {
@@ -147,27 +217,6 @@ document.addEventListener("DOMContentLoaded", () => {
     function removeBubble(id) {
         const el = document.getElementById(id);
         if (el) el.remove();
-    }
-
-    // ========================================================================
-    // FEATURE 3: AUDIO SYNC 
-    // ========================================================================
-
-    async function handleAudioSync() {
-        console.log("--- Starting Feature 3: Audio Sync ---");
-        const mainDisplay = document.getElementById('mainDisplay');
-
-        mainDisplay.innerHTML = `
-            <div style="text-align: center; padding: 20px; color: white;">
-                <h2>Audio Sync</h2>
-                <p>Feature coming soon...</p>
-            </div>
-        `;
-
-        // [COMMAND]: PUT YOUR AUDIO SYNC LOGIC HERE
-        // 1. Export Audio A & B
-        // 2. Send to AI
-        // 3. Move Clip
     }
 
 }); // --- END OF DOMContentLoaded ---

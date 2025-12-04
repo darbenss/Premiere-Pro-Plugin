@@ -15,6 +15,7 @@ from tools.add_transition import add_transition_tool
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, ToolMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import StrOutputParser
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph, MessagesState, START
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -179,6 +180,7 @@ def get_intent(human_messages: str, config):
     recent_history = history[-5:] 
     
     # 1. Construct the message list (This part was fine)
+    # 1. Construct the message list (This part was fine)
     messages = [
         intent_system_prompt,
         *recent_history, 
@@ -192,7 +194,15 @@ def get_intent(human_messages: str, config):
     # 3. Invoke the chain WITH the messages list as input
     result = chain.invoke(messages, config=config)
     
+    # 2. Define the chain (Runnables only)
+    # We pipe the LLM into a parser to get the string content automatically
+    chain = llm | StrOutputParser()
+
+    # 3. Invoke the chain WITH the messages list as input
+    result = chain.invoke(messages, config=config)
+    
     print(f"DEBUG Intent: {result}")
+    
     
     try:
         # Optional: Clean up markdown formatting if the LLM adds ```json ... ```
