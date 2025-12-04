@@ -3,87 +3,94 @@ const { Constants, TickTime, Exporter, TransitionFactory, AddTransitionOptions }
 const { storage } = require("uxp");
 const fs = storage.localFileSystem;
 
-// Mock AI Data (Simulating your partner's JSON structure)
-const MOCK_AI_RESPONSE = {
-    "session_id": "16213822",
-    "response_text": "All set. I added transitions...",
-    "command": {
-        "action": "add_transition",
-        "payload": {
-            "action_type": "add_transition",
-            "transitions": [
-                {
-                    "cut_index": 0, // Note: AI uses 0-based index here based on your example
-                    "transition_name": "AE.ADBE Cross Dissolve New",
-                    "vibe_used": "cross dissolve",
-                    "duration": 2
-                },
-                {
-                    "cut_index": 1,
-                    "transition_name": "AE.ADBE Dip To Black", // Changed to a standard one for testing consistency
-                    "vibe_used": "glitch morph",
-                    "duration": 1
-                }
-            ]
-        }
-    }
-};
-
 // ========================================================================
 // FEATURE 2: TRANSITION RECOMMENDATION
 // ========================================================================
 
-async function handleTransitionRecommendation() {
-    console.log("[DEBUG] --- Started Transition Recommendation Engine ---");
+/**
+ * Gathers clip context for transition recommendation.
+ * Extracts frames from clips in the active sequence.
+ * @returns {Promise<Object>} Object containing framePaths and clips.
+ */
+async function gatherClipContext() {
+    console.log("[DEBUG] --- Starting Gather Clip Context ---");
 
     try {
         const project = await app.Project.getActiveProject();
-        if (!project) { console.error("[DEBUG] No Project"); return; }
+        if (!project) { console.error("[DEBUG] No Project"); return null; }
 
         const sequence = await project.getActiveSequence();
-        if (!sequence) { console.error("[DEBUG] No Sequence"); return; }
+        if (!sequence) { console.error("[DEBUG] No Sequence"); return null; }
 
         // 1. ENCODER: Extract Frames and Prepare Data
         const { framePaths, clips } = await transitionEncoder(sequence);
 
         if (!framePaths || framePaths.length === 0) {
             console.warn("[DEBUG] No frames extracted or not enough clips.");
-            return;
+            return null;
         }
 
         console.log("[DEBUG] Encoder Output (Frame Paths):", JSON.stringify(framePaths, null, 2));
 
-        // 2. FETCH: Send to AI (Mocked for now)
-        // In a real scenario, you would do:
-        
-        const response = await fetch("http://localhost:8000/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                message: "Recommend transitions",
-                session_id: "16213822",
-                image_transition_path: framePaths
-            })
-        });
-        
-        const aiResponse = await response.json();
-    
-        console.log("[DEBUG] AI Response:", JSON.stringify(aiResponse, null, 2));
-
-        // Simulating network delay
-        await new Promise(r => setTimeout(r, 500));
-
-        // Mock AI Response
-        // const aiResponse = MOCK_AI_RESPONSE;
-
-        // 3. DECODER: Apply Transitions
-        await transitionDecoder(aiResponse, clips);
-
-        console.log("[DEBUG] --- Analysis Complete ---");
+        // Return data needed for AI
+        return { framePaths, clips };
 
     } catch (err) {
-        console.error("[DEBUG] CRITICAL ERROR:", err);
+        console.error("[DEBUG] CRITICAL ERROR in gatherClipContext:", err);
+        return null;
     }
+}
+
+/**
+ * Processes the transition payload from AI.
+ * @param {Object} payload - The payload containing transitions.
+ */
+async function processTransitions(payload) {
+    console.log("[DEBUG] --- Starting Process Transitions ---");
+
+    // We need clips to apply transitions. 
+    // Since we can't easily pass the clip objects through the JSON payload roundtrip if we were stateless,
+    // we might need to re-fetch them or assume the state is consistent.
+    // However, for this refactor, let's re-fetch the clips to be safe and robust, 
+    // OR we can rely on the fact that the sequence hasn't changed much.
+    // But `gatherClipContext` returned clips, and `processTransitions` receives payload.
+    // The payload doesn't have the clip objects.
+    // We need to get the clips again to apply transitions to them.
+
+    const project = await app.Project.getActiveProject();
+    const sequence = await project.getActiveSequence();
+    const videoTrack = await sequence.getVideoTrack(0);
+    let clipType = Constants && Constants.TrackItemType ? Constants.TrackItemType.CLIP : 1;
+    let rawClips = await videoTrack.getTrackItems(clipType, 0);
+
+    // Sort clips to match the index used in gather
+    const clips = rawClips.sort((a, b) => {
+        const startA = a.getStartTime().seconds || 0;
+        const startB = b.getStartTime().seconds || 0;
+        return startA - startB;
+    });
+
+    if (payload && payload.transitions) {
+        for (let transition of payload.transitions) {
+            const duration = transition.duration || 1.0;
+            const transitionName = transition.transition_name;
+            const cutIndex = transition.cut_index;
+
+            const targetClipIndex = cutIndex + 1;
+
+            if (targetClipIndex < clips.length) {
+                const targetClip = clips[targetClipIndex];
+                console.log(`[DEBUG] Applying '${transitionName}' to Clip Index ${targetClipIndex} (Duration: ${duration}s)`);
+                await applyTransition(targetClip, transitionName, duration);
+            } else {
+                console.warn(`[DEBUG] AI asked for Cut Index ${cutIndex} (Target Clip ${targetClipIndex}), but it's out of bounds.`);
+            }
+        }
+    } else {
+        console.warn("[DEBUG] No transitions found in payload.");
+    }
+
+    console.log("[DEBUG] --- Process Transitions Complete ---");
 }
 
 // ========================================================================
@@ -178,46 +185,6 @@ async function transitionEncoder(sequence) {
     }
 
     return { framePaths, clips };
-}
-
-// ========================================================================
-// DECODER
-// ========================================================================
-
-async function transitionDecoder(aiResponse, clips) {
-    console.log("[DEBUG] --- Starting Decoder ---");
-
-    // Validate structure based on your partner's format
-    if (aiResponse && aiResponse.commands) {
-        
-        const commandList = aiResponse.commands;
-
-        for (let command of commandList) {
-            if (command.payload.action_type === "add_transition") {
-                for (let transition of command.payload.transitions) {
-                    const duration = transition.duration || 1.0;
-                    const transitionName = transition.transition_name;
-                    const cutIndex = transition.cut_index;
-
-                    const targetClipIndex = cutIndex + 1;
-
-                    if (targetClipIndex < clips.length) {
-                        const targetClip = clips[targetClipIndex];
-                        console.log(`[DEBUG] Applying '${transitionName}' to Clip Index ${targetClipIndex} (Duration: ${duration}s)`);
-                        await applyTransition(targetClip, transitionName, duration);
-                    } else {
-                        console.warn(`[DEBUG] AI asked for Cut Index ${cutIndex} (Target Clip ${targetClipIndex}), but it's out of bounds.`);
-                    }
-                }
-            } else if (command.payload.action_type === "trim_silence") {
-                let ranges = [];
-                ranges = command.payload.segments;
-                // TODO: Implement trim silence
-            }
-        }
-    } else {
-        console.warn("[DEBUG] Invalid AI Response structure.");
-    }
 }
 
 // ========================================================================
@@ -321,13 +288,6 @@ async function uxpExportFrame(sequence, tickTimeObj, fileNameSuffix) {
     }
 }
 
-async function uxpExportFrameToTemp(sequence, tickTimeObj, fileNameSuffix) {
-    // This function is now largely redundant as uxpExportFrame handles temp fallback, 
-    // but keeping it if needed or we can remove it.
-    // For now, I'll just alias it to uxpExportFrame logic if called, or ignore it.
-    return await uxpExportFrame(sequence, tickTimeObj, fileNameSuffix);
-}
-
 async function applyTransition(clipObject, matchName, durationInSeconds = 1.0) {
     try {
         const transitionObj = await TransitionFactory.createVideoTransition(matchName);
@@ -362,5 +322,6 @@ async function applyTransition(clipObject, matchName, durationInSeconds = 1.0) {
 }
 
 module.exports = {
-    handleTransitionRecommendation
+    gatherClipContext,
+    processTransitions
 };
