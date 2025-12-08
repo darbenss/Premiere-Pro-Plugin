@@ -159,6 +159,8 @@ async function highlightCurrentRange() {
         await project.executeTransaction((compoundAction) => {
             if (seq.createSetInPointAction)
                 compoundAction.addAction(seq.createSetInPointAction(startTick));
+        });
+        await project.executeTransaction((compoundAction) => {
             if (seq.createSetOutPointAction)
                 compoundAction.addAction(seq.createSetOutPointAction(endTick));
         });

@@ -55,7 +55,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const action = event.currentTarget.getAttribute('label');
             // --- ROUTER LOGIC ---
             if (action === "Trim Silence") {
-                showUnderConstructionWithDelay();
+                await processUserMessage(action);
             }
             else if (action === "Audio Sync") {
                 showUnderConstructionWithDelay();
@@ -120,12 +120,12 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             // GATEKEEPER: BLOCK INTENTS
-            const BLOCKED_INTENTS = ["trim_silence", "lips_sync"]; 
+            const BLOCKED_INTENTS = ["lips_sync"];
             if (intentData.required_tools && intentData.required_tools.some(tool => BLOCKED_INTENTS.includes(tool))) {
                 console.log(`🚫 Intent '${intentData.required_tools}' is currently disabled.`);
-                removeBubble(loadingId); 
-                showUnderConstructionWithDelay(); 
-                return; 
+                removeBubble(loadingId);
+                showUnderConstructionWithDelay();
+                return;
             }
 
             // Logic: If immediate_reply is not null and required_tools is empty, just display message

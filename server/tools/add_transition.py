@@ -4,13 +4,18 @@ from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage
 from fastapi import HTTPException
 from var import OPENROUTER_API_KEY
+from tools.create_transition_db import create_transition_db
 
 # Ensure directory exists or handle error if needed
 chroma_client = chromadb.PersistentClient(path="./transition_db")
 
-transition_db = chroma_client.get_collection(
-    name="premiere_transitions"
-)
+try:
+    transition_db = chroma_client.get_collection(
+        name="premiere_transitions"
+    )
+except:
+    print("Transition DB not found. Creating new collection...")
+    transition_db = create_transition_db()
 
 vibe_transition_system_prompt = SystemMessage(
     content="""You are a video editor assistant. You are given a list of image frame descriptions and a human message. 
