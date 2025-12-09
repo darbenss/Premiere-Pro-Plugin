@@ -10,3 +10,16 @@ Make sure Premiere Pro is up and running first. First, add the plugin to the "De
 - Otherwise, click "Add Plugin" and select the `manifest.json` file in the corresponding plugin folder.
 
 Click the ••• button next to the corresponding workspace entry, and click "Load". Switch over to Premiere Pro, and the plugin's panel will be running.
+
+
+## ✨ Credits
+
+This project was created and designed by **[@calvinchristofan](https://github.com/calvinchristofan)**.
+
+**Lead Developers:**
+* Codebase developed by **[@FilbertNg](https://github.com/FilbertNg)** and **[@darbenss](https://github.com/darbenss)**.
+
+---
+
+**Copyright:**
+© 2025 Marksman Media Pte. Ltd. All Rights Reserved.
