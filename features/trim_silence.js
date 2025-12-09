@@ -129,7 +129,7 @@ async function performTrimSilence(silentRanges) {
 }
 
 async function nextStep(wasActionTaken) {
-    wizardState.currentIndex;
+    wizardState.currentIndex++;
     if (wizardState.currentIndex >= wizardState.ranges.length) {
         finishWizard();
         return;
@@ -151,9 +151,19 @@ async function highlightCurrentRange() {
     const project = await app.Project.getActiveProject();
     const seq = await project.getActiveSequence();
 
-    const startTick = TickTime.createWithSeconds(range.start);
-    console.log("Start Tick:", startTick);
-    const endTick = TickTime.createWithSeconds(range.end);
+    // Put timeline based on FPS
+    const timebaseString = await seq.getTimebase();
+    const frameDurationTicks = BigInt(timebaseString);
+
+    const getSnappedTickTime = (seconds) => {
+        const exactTicks = BigInt(Math.round(seconds * 254016000000));
+        const frameIndex = (exactTicks + (frameDurationTicks / 2n)) / frameDurationTicks;
+        const alignedTicks = frameIndex * frameDurationTicks;
+        return TickTime.createWithTicks(alignedTicks.toString());
+    };
+
+    const startTick = getSnappedTickTime(range.start);
+    const endTick = getSnappedTickTime(range.end);
 
     await project.lockedAccess(async () => {
         await project.executeTransaction((compoundAction) => {
