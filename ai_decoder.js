@@ -12,7 +12,7 @@
 
 const { processTrimSilence } = require('./features/trim_silence.js');
 const { processTransitions } = require('./features/add_transition.js');
-
+const { processCurseWordDetection } = require('./features/curseword_detection.js');
 
 /**
  * Executes the commands returned by the AI.
@@ -42,6 +42,9 @@ async function executeAICommands(commands, aiMessage) {
                 break;
             case 'add_transition':
                 await processTransitions(payload);
+                break;
+            case 'curseword_detect':
+                await processCurseWordDetection(payload);
                 break;
             default:
                 console.warn(`Unknown action: ${action}`);

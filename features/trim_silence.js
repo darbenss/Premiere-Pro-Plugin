@@ -1,5 +1,5 @@
 const app = require('premierepro');
-const { Constants, EncoderManager, TickTime } = require('premierepro');
+const { Constants, EncoderManager} = require('premierepro');
 const { storage } = require("uxp");
 const fs = storage.localFileSystem;
 
@@ -8,8 +8,6 @@ let wizardState = {
     ranges: [],
     currentIndex: 0
 };
-
-
 
 // ========================================================================
 //  FEATURE 1: TRIM SILENCE (Logic & Wizard)

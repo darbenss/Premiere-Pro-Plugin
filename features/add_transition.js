@@ -321,6 +321,7 @@ async function applyTransition(clipObject, matchName, durationInSeconds = 1.0) {
     }
 }
 
+
 module.exports = {
     gatherClipContext,
     processTransitions

@@ -15,6 +15,7 @@
 const { executeAICommands } = require('./ai_decoder.js');
 const { gatherAudioContext } = require('./features/trim_silence.js');
 const { gatherClipContext } = require('./features/add_transition.js');
+const { gatherAudioContextCurseWord } = require('./features/curseword_detection.js');
 const { generateSimpleUniqueId } = require('./uniquesession_id.js'); // Import Session Generator
 
 // GLOBAL STATE
@@ -23,7 +24,8 @@ let currentSessionId = null;
 // TOOL REGISTRY
 const TOOL_REGISTRY = {
     "trim_silence": gatherAudioContext,
-    "add_transition": gatherClipContext
+    "add_transition": gatherClipContext,
+    "curse_word_detection": gatherAudioContextCurseWord
 };
 
 // ============================================================================
@@ -57,8 +59,8 @@ document.addEventListener("DOMContentLoaded", () => {
             if (action === "Trim Silence") {
                 await processUserMessage(action);
             }
-            else if (action === "Audio Sync") {
-                showUnderConstructionWithDelay();
+            else if (action === "Curse Word Detection") {
+                await processUserMessage(action);
             }
             else if (action === "Transition Recommendation") {
                 await processUserMessage(action);
@@ -141,8 +143,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (intentData.required_tools && intentData.required_tools.length > 0) {
                 // Update UI to show we are working
-                // Optional: addBubble("Analyzing project...", 'ai'); 
-
                 for (const toolName of intentData.required_tools) {
                     const gatherFunc = TOOL_REGISTRY[toolName];
                     if (gatherFunc) {
@@ -172,6 +172,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 console.log("path: ", contextData["add_transition"]);
                 body.image_transition_path = contextData["add_transition"];
             }
+            if (contextData["curseword_detect"]) {
+                body.curseword_detect_path = contextData["curseword_detect"];
+            }
             // TODO: If want to add more context data, add it here
 
             console.log("Body:", body);
@@ -188,6 +191,7 @@ document.addEventListener("DOMContentLoaded", () => {
             console.log("Process Result:", result);
 
             // Update Session ID if returned
+
             if (result.session_id) {
                 currentSessionId = result.session_id;
                 console.log("Session ID Updated (Process):", currentSessionId);
