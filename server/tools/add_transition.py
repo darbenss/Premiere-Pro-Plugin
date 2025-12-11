@@ -127,9 +127,9 @@ def add_transition_tool(target_vibes_json: str, durations_json: str, img_paths_j
     Generates a SEQUENCE of transitions with specific vibes and durations.
     
     Args:
-        target_vibes_json (str): JSON string list of vibe strings (e.g. '["glitch", "dissolve"]').
-        durations_json (str): JSON string list of float seconds (e.g. '[0.5, 1.5]').
-        img_paths_json (str): The JSON string of the list of clips.
+        target_vibes_json (str): A JSON string list of style descriptions (e.g. '["fast glitch", "smooth cinematic dissolve", "quick whip pan"]'). Length must match the number of cuts.
+        durations_json (str): A JSON string list of float durations in seconds (e.g. '[0.3, 1.5, 0.8]'). Length must match target_vibes_json.
+        img_paths_json (str): The raw JSON string of clip paths from the context.
     """
     try:
         clips = json.loads(img_paths_json)
@@ -144,16 +144,39 @@ def add_transition_tool(target_vibes_json: str, durations_json: str, img_paths_j
     num_cuts = len(clips) - 1
     
     # --- SAFETY LOGIC: Handle Mismatches ---
-    # If Agent sent a single string instead of a list, fix it
+    # 1. Fix Vibes List
     if isinstance(vibes, str):
         vibes = [vibes] * num_cuts
     
-    # If Agent sent fewer vibes than cuts (e.g. 3 cuts, but only provided ["glitch"]), 
-    # we extend the list using the last vibe.
     if len(vibes) < num_cuts:
         print(f"⚠️ Warning: Agent provided {len(vibes)} vibes for {num_cuts} cuts. Repeating last vibe.")
         missing_count = num_cuts - len(vibes)
-        vibes.extend([vibes[-1]] * missing_count)
+        # Check if list is not empty to avoid crash
+        fill_vibe = vibes[-1] if vibes else "cross dissolve"
+        vibes.extend([fill_vibe] * missing_count)
+
+    # 2. Fix Durations List
+    # Case A: AI sent a single number (e.g. 0.5) instead of a list
+    if isinstance(durations, (float, int, str)):
+        try:
+            val = float(durations)
+            durations = [val] * num_cuts
+        except ValueError:
+            durations = [1.0] * num_cuts
+
+    # Case B: AI sent a list, but it's too short (e.g. 2 durations for 4 cuts)
+    if len(durations) < num_cuts:
+        print(f"⚠️ Warning: Agent provided {len(durations)} durations for {num_cuts} cuts. Fixing.")
+        missing_count = num_cuts - len(durations)
+        
+        # Logic: Repeat the last valid duration the AI gave. 
+        # If list is completely empty, default to 1.0s.
+        if len(durations) > 0:
+            fill_value = float(durations[-1])
+        else:
+            fill_value = 1.0
+            
+        durations.extend([fill_value] * missing_count)
 
     transitions_sequence = []
     

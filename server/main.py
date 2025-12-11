@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import json
 import base64
@@ -16,7 +17,6 @@ from tools.add_transition import add_transition_tool
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, ToolMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.output_parsers import StrOutputParser
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph, MessagesState, START
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -31,9 +31,10 @@ if not OPENROUTER_API_KEY:
 # 1. Initialize LLM
 llm = ChatOpenAI(
     model=OPENROUTER_MODEL,
-    openai_api_key=OPENROUTER_API_KEY,
+    api_key=OPENROUTER_API_KEY,
     base_url=OPENROUTER_BASE_URL,
-    temperature=0
+    temperature=0,
+    max_tokens=40000,
 )
 
 # 2. Bind Tools
@@ -75,11 +76,11 @@ app.add_middleware(
 # --- API MODELS ---
 
 class IntentRequest(BaseModel):
-    session_id: str # = Field(default_factory=lambda: str(uuid.uuid4()))
+    session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     message: str
 
 class ToolsRequest(BaseModel):
-    session_id: str # = Field(default_factory=lambda: str(uuid.uuid4()))
+    session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     message: str
     audio_file_path: Optional[str] = None                       # Trim Silence
     image_transition_path: Optional[List[List[str]]] = None     # Add Transition
@@ -90,7 +91,7 @@ class ToolCommand(BaseModel):
     payload: Dict[str, Any]
 
 class ChatResponse(BaseModel):
-    session_id: str # Return ID so client can store it
+    session_id: str = Field(default_factory=lambda: str(uuid.uuid4())) # Return ID so client can store it
     response_text: str
     commands: Optional[List[ToolCommand]] = None
 
@@ -118,19 +119,20 @@ system_prompt = (
     - **Stay Grounded**: Only recommend next steps if they involve the 3 tools above. Do not offer to color grade, generate subtitles, or fetch coffee.
 
     RULES for 'add_transition_tool':
-    1. You will receive multiple images representing sequential cuts.
-    2. You must generate TWO lists: one for 'vibes' and one for 'durations' (seconds).
-    3. Input 'target_vibes_json': A JSON string list of styles. 
-       - Example: '["slow dissolve", "fast glitch"]'
-    4. Input 'durations_json': A JSON string list of floats (Max 2.0 seconds).
-       - REASONING GUIDE:
-         - Fast/Glitchy/Action -> Short duration (0.2 - 0.5s)
-         - Smooth/Dreamy/Sad -> Long duration (1.0 - 2.0s)
-         - Standard Cut -> Medium duration (0.5 - 1.0s)
-       - Example: '[1.0, 0.2]'
-    5. Input 'img_paths_json': COPY the exact JSON string provided in context.
-    6. Ensure the length of the lists matches the number of cuts
-    7. **Execution**: Apply these automatically. Do not ask the user "What duration do you want?" unless they specifically care. Just pick the best one for the vibe."""
+    1. **Count Check**: Look for "Target Cut Count" in the system note. Your output lists MUST have exactly that many items.
+    2. **Visual Analysis (CRITICAL)**: Act like a Film Director. Look at the [System Context Data].
+       - Compare the Color/Lighting between the two shots.
+       - Compare the Movement (Static vs. Action).
+       - **Do NOT default to generic 'glitch' or 'dissolve'**. 
+       - If shots are similar (same scene) -> Suggest "Morph Cut" or "Invisible Cut".
+       - If shots are different (scene change) -> Suggest "Dip to Black", "Light Leak", or "Whip Pan".
+       - Be specific: e.g., "Warm Light Leak", "Cyberpunk Glitch", "Soft Blur".
+    3. **Duration Logic**: Generate 'durations_json' based on the vibe (Max 2.0s):
+         - Fast/Glitchy/Action -> 0.2 - 0.5s
+         - Standard -> 0.5 - 1.0s
+         - Smooth/Dreamy -> 1.0 - 2.0s
+    4. **Data Handling**: Simply COPY 'img_paths_json' from the context. Retain the double backslashes.
+    5. **Execution**: Apply automatically. Do not ask for user confirmation on durations."""
 )
 
 intent_system_prompt = SystemMessage(content="""
@@ -192,23 +194,23 @@ def get_intent(human_messages: str):
     # 3. Invoke the chain WITH the messages list as input
     result = chain.invoke(messages)
     
-    # 2. Define the chain (Runnables only)
-    # We pipe the LLM into a parser to get the string content automatically
-    chain = llm | StrOutputParser()
-
-    # 3. Invoke the chain WITH the messages list as input
-    result = chain.invoke(messages)
-    
     print(f"DEBUG Intent: {result}")
     
-    
     try:
-        # Optional: Clean up markdown formatting if the LLM adds ```json ... ```
-        cleaned_result = result.strip().removeprefix("```json").removeprefix("```").removesuffix("```")
-        return json.loads(cleaned_result)
-    except json.JSONDecodeError:
-        # Fallback or raise error
-        raise HTTPException(status_code=500, detail="Not a valid JSON response.")
+        json_match = re.search(r"(\{.*\}|\[.*\])", result, re.DOTALL)
+        
+        if json_match:
+            clean_json = json_match.group(0)
+            return json.loads(clean_json)
+        else:
+            # Fallback: Try standard cleanup if regex fails
+            cleaned_result = result.strip().replace("```json", "").replace("```", "").strip()
+            return json.loads(cleaned_result)
+
+    except (json.JSONDecodeError, AttributeError):
+        print(f"❌ JSON Parse Error. Raw content: {result}")
+        # Fallback intent if parsing fails entirely
+        return {"tools": [], "reply": "I'm sorry, I couldn't process that request."}
     
 
 # --- API ENDPOINT ---
@@ -312,6 +314,7 @@ async def process_request_endpoint(request: ToolsRequest):
                             print(f"⚠️ MISSING FILE: {clean_path}")
                             # Optional: Add a small retry if it's a race condition
                             while not os.path.exists(clean_path):
+                                print("Waiting for file to be created...")
                                 time.sleep(1) 
                             
                             if not os.path.exists(clean_path):
@@ -324,7 +327,7 @@ async def process_request_endpoint(request: ToolsRequest):
                                 "type": "image_url",
                                 "image_url": {
                                     "url": f"data:image/jpeg;base64,{base64_image}",
-                                    "detail": "low"
+                                    "detail": "high"
                                 }
                             })
                         except Exception as encode_err:
@@ -332,7 +335,7 @@ async def process_request_endpoint(request: ToolsRequest):
 
                 message_content.append({
                     "type": "text", 
-                    "text": f"[System Note]: The images above represent {len(clips)-1} cut points..."
+                    "text": f"**[System Note]: Target Cut Count: {len(clips) - 1}**\n"
                 })
 
             except Exception as e:

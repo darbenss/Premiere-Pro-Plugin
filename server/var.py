@@ -7,7 +7,7 @@ if os.path.exists(".env"):
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-OPENROUTER_MODEL = "openai/gpt-5-nano" 
+OPENROUTER_MODEL = "google/gemini-2.5-flash-lite"
 
 
 PORT = int(os.getenv("PORT")) if os.getenv else 8000
