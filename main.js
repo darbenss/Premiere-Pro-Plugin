@@ -25,7 +25,7 @@ let currentSessionId = null;
 const TOOL_REGISTRY = {
     "trim_silence": gatherAudioContext,
     "add_transition": gatherClipContext,
-    "curse_word_detection": gatherAudioContextCurseWord
+    "curseword_detect": gatherAudioContextCurseWord
 };
 
 // ============================================================================
