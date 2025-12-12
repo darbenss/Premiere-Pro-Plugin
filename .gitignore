@@ -7,6 +7,9 @@ wheels/
 *.egg-info
 server/checkpoints.sqlite
 
+# Test files
+server/*.ipynb
+
 # Virtual environments
 .venv
 .env

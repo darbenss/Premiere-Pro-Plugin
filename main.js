@@ -63,7 +63,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 await processUserMessage(action);
             }
             else if (action === "Transition Recommendation") {
-                await processUserMessage(action);
+                await processUserMessage("Add Transition");
             }
         });
     });
