@@ -1,5 +1,6 @@
 import chromadb
 import json
+import ast
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage
 from fastapi import HTTPException
@@ -17,85 +18,28 @@ except:
     print("Transition DB not found. Creating new collection...")
     transition_db = create_transition_db()
 
-vibe_transition_system_prompt = SystemMessage(
-    content="""You are a video editor assistant. You are given a list of image frame descriptions and a human message. 
-    You need to analyze the context of the frames and the user's intent to determine the 'vibe' or style of the video transition needed. 
-    Return a JSON object with a key called 'vibe' and the value being a descriptive string of the visual style (e.g., 'fast paced action', 'slow dreamlike dissolve', 'glitchy tech').
-    Example: {{"vibe": "a glitchy computer error or broken screen"}}"""
-)
 
-def img_path_parser(img_path: list[list[str]]):
-    """
-    Parses list of clips to get the relevant frames for transition context.
-    Structure: [[start_frame, end_frame], [start_frame, end_frame]]
-    """
-    image = {}
-    
-    for i, img in enumerate(img_path):
-        # Safety check for empty lists
-        if not img: 
-            continue
-
-        if i == 0:
-            image[f"video{i+1}"] = {"last_frame": img[-1]} 
-        elif i == len(img_path) - 1:
-            image[f"video{i+1}"] = {"first_frame": img[0]}
-        else:
-            image[f"video{i+1}"] = {"first_frame": img[0], "last_frame": img[-1]}
-
-    print(f"🤖 AI: Analyzed frames: {image}")
-    return image
-
-
-# --- DUMMY AI LOGIC ---
-def ai_vibe_transition(session_id: str, img_path: list[list[str]], human_messages: str):
-    """Simulates the VLM analyzing images."""
-    from main import graph, llm             # To resolve circular import
-    print(f"🤖 AI: Analyzing frames...")
-
-    img_parsed = img_path_parser(img_path)
-
-    if not OPENROUTER_API_KEY:
-        raise HTTPException(status_code=500, detail="Missing API Key configuration.")
-
-    # Context injection
-    context_msg = human_messages if human_messages else "I want to add a transition between these clips."
-    context_msg += f"\n\n[System Context Data - Frame Analysis]:\n {json.dumps(img_parsed)}\n\n" 
-
-    config = {"configurable": {"thread_id": session_id}}
-
-    # Fetch History
-    current_state = graph.get_state(config)
-    history = current_state.values.get("messages", [])
-    
-    # Filter history to avoid token overflow, but ensure valid message objects
-    recent_history = history[-5:] 
-    
-    messages = [
-        vibe_transition_system_prompt,
-        *recent_history, 
-        HumanMessage(content=context_msg)
-    ]
-
-    try:
-        response = llm.invoke(messages)
-        result_content = response.content
+def robust_parse(input_str):
+        # 1. Try standard JSON
+        try:
+            return json.loads(input_str)
+        except json.JSONDecodeError:
+            pass
         
-        print(f"DEBUG Intent: {result_content}")
-        
-        if "```json" in result_content:
-            result_content = result_content.split("```json")[1].split("```")[0].strip()
-        elif "```" in result_content:
-             result_content = result_content.split("```")[1].strip()
-
-        return json.loads(result_content)
-
-    except json.JSONDecodeError:
-        print("Error decoding JSON, returning fallback.")
-        raise HTTPException(status_code=500, detail="Error decoding JSON, returning fallback.")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI Processing Error: {str(e)}")
-
+        # 2. Try Python Literal Eval
+        try:
+            return ast.literal_eval(input_str)
+        except (ValueError, SyntaxError):
+            pass
+            
+        # 3. Last Resort: Brute-force fix single backslashes
+        try:
+            # Replace single \ with \\ 
+            fixed_str = input_str.replace('\\', '\\\\').replace('\\\\\\\\', '\\\\')
+            return json.loads(fixed_str)
+        except Exception:
+            print(f"❌ Failed to parse input: {input_str}")
+            return []
 
 def vector_search(query_vibe):
     """
@@ -131,14 +75,16 @@ def add_transition_tool(target_vibes_json: str, durations_json: str, img_paths_j
         durations_json (str): A JSON string list of float durations in seconds (e.g. '[0.3, 1.5, 0.8]'). Length must match target_vibes_json.
         img_paths_json (str): The raw JSON string of clip paths from the context.
     """
-    try:
-        clips = json.loads(img_paths_json)
-        vibes = json.loads(target_vibes_json)
-        durations = json.loads(durations_json)
-    except Exception as e:
-        return json.dumps({"error": f"Invalid JSON format: {str(e)}"})
+    
+    clips = robust_parse(img_paths_json)
+    vibes = robust_parse(target_vibes_json)
+    durations = robust_parse(durations_json)
+
+    if not clips or not vibes:
+        return json.dumps({"error": "Failed to parse inputs. Check format."})
 
     if len(clips) < 2:
+        print(f"⚠️ Error: Need at least 2 clips to add a transition. Received {len(clips)} clips.")
         return json.dumps({"error": "Need at least 2 clips to add a transition.", "count": 0})
 
     num_cuts = len(clips) - 1

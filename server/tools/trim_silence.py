@@ -77,9 +77,15 @@ def calculate_silence_timestamps(audio_path: str, threshold: float = 0.5):
 @tool
 def trim_silence_tool(audio_path: str):
     """
-    Analyzes an audio file to detect silent sections. 
-    Call this when the user asks to remove silence, cut quiet parts, or trim audio.
-    Returns a JSON string with the detected timestamps.
+    Scans the audio file to find silent sections that should be removed.
+    
+    Args:
+        audio_path (str): The absolute file path to the audio file.
+        
+    Returns:
+        str: A JSON string for UXP processing. Key fields for the Agent:
+             - count (int): The total number of silent gaps found.
+             - segments (list): The technical timestamp data for Premiere Pro (Agent can ignore details).
     """
     print(f"[TOOL] Running Trim Silence on: {audio_path}")
     
